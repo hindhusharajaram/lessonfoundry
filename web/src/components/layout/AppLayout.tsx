@@ -2,6 +2,7 @@ import React from 'react';
 import { useLocation } from 'react-router-dom';
 import { ShieldCheck } from 'lucide-react';
 import { useRole } from '../../context/RoleContext';
+import { AccessibilityToolbar } from '../common/AccessibilityToolbar';
 import { Sidebar } from './Sidebar';
 
 export const Header: React.FC = () => {
@@ -29,6 +30,8 @@ export const Header: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-4">
+        <AccessibilityToolbar />
+
         <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
           <ShieldCheck className="w-3.5 h-3.5" />
           <span>Evidence-Locked Engine Active</span>

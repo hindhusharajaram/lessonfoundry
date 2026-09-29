@@ -526,3 +526,116 @@ def test_change_impact_engine_categorization():
     assert impact["affected_slots"][0]["type"] == "quiz_item"
     assert impact["unaffected_slots"][0]["type"] == "explanation"
     session.close()
+
+
+def test_student_quiz_results_and_learning_gap_analytics():
+    session = SessionLocal()
+    src = Source(title="Photosynthesis", filename="photo.txt")
+    session.add(src)
+    session.flush()
+
+    s_ver = SourceVersion(source_id=src.id, version_no=1, text="Chloroplasts absorb photons and produce ATP.", sha256="h7")
+    session.add(s_ver)
+    session.flush()
+
+    chunk = SourceChunk(source_version_id=s_ver.id, idx=0, char_start=0, char_end=len(s_ver.text), text=s_ver.text)
+    session.add(chunk)
+    session.flush()
+
+    unit = Unit(title="Test Unit", source_id=src.id, pinned_source_version_id=s_ver.id, status="published")
+    session.add(unit)
+    session.flush()
+
+    obj1 = Objective(unit_id=unit.id, position=1, text="Objective 1", supported=True)
+    obj2 = Objective(unit_id=unit.id, position=2, text="Objective 2", supported=True)
+    session.add_all([obj1, obj2])
+    session.flush()
+
+    slot1 = Slot(unit_id=unit.id, objective_id=obj1.id, type="quiz_item", position=1, difficulty="medium", bloom_tag="Understand")
+    slot2 = Slot(unit_id=unit.id, objective_id=obj2.id, type="quiz_item", position=2, difficulty="advanced", bloom_tag="Analyze")
+    session.add_all([slot1, slot2])
+    session.flush()
+
+    a1 = Asset(slot_id=slot1.id, status="approved", locked=True)
+    a2 = Asset(slot_id=slot2.id, status="approved", locked=True)
+    session.add_all([a1, a2])
+    session.flush()
+
+    v1 = AssetVersion(
+        asset_id=a1.id,
+        version_no=1,
+        variant="standard",
+        content={"question": "What is ATP?", "options": ["Energy", "Water", "Gas", "Rock"], "correct_index": 0, "rationale": "ATP stores chemical energy", "quote": "produce ATP."},
+        model="gemini",
+        prompt_version="1.0",
+        settings={},
+        source_version_id=s_ver.id,
+        source_sha256="h7",
+    )
+    v2 = AssetVersion(
+        asset_id=a2.id,
+        version_no=1,
+        variant="standard",
+        content={"question": "Where does photolysis occur?", "options": ["Stroma", "Thylakoid", "Cytoplasm", "Matrix"], "correct_index": 1, "rationale": "Occurs in thylakoid", "quote": "Chloroplasts absorb photons"},
+        model="gemini",
+        prompt_version="1.0",
+        settings={},
+        source_version_id=s_ver.id,
+        source_sha256="h7",
+    )
+    session.add_all([v1, v2])
+    session.flush()
+
+    a1.current_version_id = v1.id
+    a2.current_version_id = v2.id
+
+    pub = Publication(unit_id=unit.id, class_label="Class 10-A", snapshot={"approved_assets_count": 2, "assets": []})
+    session.add(pub)
+
+    # Add a synthetic student
+    st = Student(name="Test Student", class_label="Class 10-A", synthetic=True)
+    session.add(st)
+    session.commit()
+
+    # 1. Student takes quiz: answer Q1 correctly (0), Q2 incorrectly (0 instead of 1)
+    res_submit = client.post(
+        "/api/student/attempts",
+        json={
+            "unit_id": unit.id,
+            "answers": [
+                {"asset_id": a1.id, "chosen_index": 0, "time_seconds": 25},
+                {"asset_id": a2.id, "chosen_index": 0, "time_seconds": 40},
+            ],
+        },
+        headers={"X-Role": "student", "X-Student-Id": str(st.id)},
+    )
+    assert res_submit.status_code == 201
+    attempt_id = res_submit.json()["attempt_id"]
+    assert res_submit.json()["score"] == 50.0
+
+    # 2. Post-submission results reveal rationales and quotes
+    res_results = client.get(
+        f"/api/student/attempts/{attempt_id}/results",
+        headers={"X-Role": "student"},
+    )
+    assert res_results.status_code == 200
+    res_data = res_results.json()
+    assert len(res_data["results"]) == 2
+    assert res_data["results"][0]["correct"] is True
+    assert res_data["results"][0]["rationale"] == "ATP stores chemical energy"
+    assert res_data["results"][1]["correct"] is False
+
+    # 3. Teacher checks analytics => gap detected on Objective 2
+    res_analytics = client.get(
+        f"/api/units/{unit.id}/analytics",
+        headers={"X-Role": "teacher"},
+    )
+    assert res_analytics.status_code == 200
+    analytics_data = res_analytics.json()
+    assert analytics_data["total_students"] >= 1
+    assert analytics_data["has_synthetic_data"] is True
+    assert analytics_data["potential_learning_gap_detected"] is True
+    assert analytics_data["gap_summary"]["recommended_objective_id"] == obj2.id
+
+    session.close()
+

@@ -64,10 +64,10 @@ export const StudentLearningPage: React.FC = () => {
                 <Button
                   className="w-full"
                   size="sm"
-                  onClick={() => navigate(`/student/quiz/${unit.id}`)}
+                  onClick={() => navigate(`/student/units/${unit.unit_id || unit.id}`)}
                   rightIcon={<ArrowRight className="w-4 h-4" />}
                 >
-                  Start Assessment
+                  Open Learning Pack
                 </Button>
               </div>
             </Card>

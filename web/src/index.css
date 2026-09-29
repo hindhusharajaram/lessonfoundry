@@ -17,6 +17,7 @@
   --color-border-subtle: #E5E9F2;
 
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-dyslexia: 'Atkinson Hyperlegible', sans-serif;
   --radius-card: 14px;
 }
 
@@ -25,6 +26,35 @@ body {
   color: #1E293B;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Accessibility Modes */
+body.dyslexia-mode {
+  font-family: 'Atkinson Hyperlegible', sans-serif !important;
+  letter-spacing: 0.04em !important;
+  line-height: 1.85 !important;
+  font-style: normal !important;
+}
+
+body.dyslexia-mode * {
+  font-style: normal !important;
+}
+
+body.contrast-high {
+  filter: contrast(1.25);
+}
+
+body.contrast-high .bg-white {
+  border-color: #94A3B8 !important;
+  border-width: 2px !important;
+}
+
+body.text-size-lg {
+  font-size: 1.125rem;
+}
+
+body.text-size-xl {
+  font-size: 1.25rem;
 }
 
 /* Custom focus ring for accessibility */

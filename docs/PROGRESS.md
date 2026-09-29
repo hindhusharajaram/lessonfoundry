@@ -132,4 +132,27 @@
   - Full production build `npm run build` succeeded cleanly in 735ms.
   - All 31 backend unit tests pass.
 
+---
+
+### Phase 6: Student Assessment Experience, Dyslexia Accessibility & Teacher Learning-Gap Reinforcement
+- [x] **Student Learning Portal & 4 Unit Tiles** (`/student/units/:id`):
+  - **Learn**: Structured explanation with glossary, worked examples, and **"Simplify this"** button executing `/api/assets/{id}/simplify` with semantic-consistency verification badge.
+  - **Take Quiz**: Single-question-at-a-time navigation, timer, difficulty & Bloom badges, progress bar, review-before-submit step, and post-submission results with `ProgressRing` score gauge and verified quote rationales.
+  - **Practice**: Differentiated Foundation vs. Advanced practice items with instant interactive feedback.
+  - **Revise**: Print-friendly structured revision sheet.
+  - Absolute zero flashcards across the entire product.
+- [x] **Global Accessibility & Dyslexia Mode**:
+  - Implemented [`web/src/components/common/AccessibilityToolbar.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/common/AccessibilityToolbar.tsx) and [`web/src/context/AccessibilityContext.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/context/AccessibilityContext.tsx).
+  - Loaded Atkinson Hyperlegible Google Font with custom spacing, no italics, high-contrast mode, and text size scaling (Normal, Large, Extra Large).
+- [x] **Teacher Analytics & Learning-Gap Reinforcement**:
+  - Implemented `GET /api/units/{id}/analytics` and `POST /api/units/{id}/reinforcement` in [`api/routes_units.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/api/routes_units.py).
+  - Designed [`web/src/pages/teacher/AnalyticsPage.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/pages/teacher/AnalyticsPage.tsx) displaying class mastery, performance by objective, per-question correctness, synthetic data indicator badge, and red **"Potential learning gap detected"** banner with a working **"Generate Reinforcement Practice"** button.
+- [x] **Synthetic Student Seeding Script**:
+  - Implemented [`scripts/seed_students.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/seed_students.py) generating 30 synthetic students with varied realistic scores.
+- [x] **Automated Tests & Production Build**:
+  - Created `test_student_quiz_results_and_learning_gap_analytics` in [`tests/test_advanced_features.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_advanced_features.py).
+  - Pytest: **32 passed, 1 skipped in 5.45s**.
+  - Production build: `npm run build` succeeded cleanly with 0 errors.
+
+
 

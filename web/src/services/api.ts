@@ -339,5 +339,21 @@ export const api = {
 
   async getUnitAnalytics(unitId: number): Promise<any> {
     return request(`/units/${unitId}/analytics`);
+  },
+
+  async generateReinforcement(unitId: number, data: { objective_id: number; count?: number }): Promise<{
+    unit_id: number;
+    objective_id: number;
+    objective_text: string;
+    slots_created_count: number;
+    created_slots: any[];
+    message: string;
+  }> {
+    return request(`/units/${unitId}/reinforcement`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
   }
 };
+
