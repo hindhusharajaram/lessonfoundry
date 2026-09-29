@@ -36,3 +36,9 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def init_db():
+    """Initializes all database tables from models."""
+    from db.models import Base as ModelsBase
+    ModelsBase.metadata.create_all(bind=engine)

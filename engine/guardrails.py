@@ -92,7 +92,7 @@ def run_unit_guardrails(unit_id: int, db: Session) -> List[QualityFlag]:
     if supported_objectives:
         obj_slot_counts: Dict[int, int] = {o.id: 0 for o in supported_objectives}
         for s in slots:
-            if s.objective_id in obj_slot_counts and s.asset and s.asset.current_version:
+            if s.objective_id in obj_slot_counts:
                 obj_slot_counts[s.objective_id] += 1
 
         total_generated_items = sum(obj_slot_counts.values())

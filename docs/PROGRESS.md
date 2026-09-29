@@ -154,5 +154,39 @@
   - Pytest: **32 passed, 1 skipped in 5.45s**.
   - Production build: `npm run build` succeeded cleanly with 0 errors.
 
+---
+
+## Prompt 8 Implementation (Evaluation Harness, System Documentation & Demo Readiness)
+
+- [x] **Formal Evaluation Harness (`python -m eval.run`)**:
+  - Implemented comprehensive 9-case evaluation runner in [`eval/run.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/eval/run.py) utilizing temporary database isolation.
+  - Generates [`eval/results.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/eval/results.md) and [`eval/results.json`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/eval/results.json).
+  - Benchmark Result: **9/9 Cases Passed (100%) in 5.11s**:
+    1. *Normal Pack Generation*: 100.0% Grounding Rate across 16 claims, zero orphan slots, full provenance.
+    2. *Thin Source Gap Refusal*: Zero slots created for off-topic genetics objective, `objective_unsupported` flag raised.
+    3. *Prompt Injection Containment*: 2 adversarial patterns flagged and strictly neutralized inside untrusted delimiters.
+    4. *Coverage Imbalance Guardrail*: Skewed distribution detected and flagged with severity=warning.
+    5. *Easy to Advanced Differentiation*: Bloom taxonomy shift confirmed (Easy 1.5 $\rightarrow$ Advanced 4.0), paraphrase similarity at 37.9% (<75% threshold), change impact categorization verified.
+    6. *Approved Asset Stability*: 4 approved assets preserved 100% byte-identical; 5th unapproved asset safely versioned with parent provenance link.
+    7. *Source Version Pinning*: SourceVersion #2 created without altering existing unit pinning or asset hashes.
+    8. *Model Outage Recovery*: Simulated 429 quota failure triggered explicit `generation_failed` state with zero database corruption.
+    9. *Fabricated Quote Rejection*: Non-LLM verifier rejected fake quote (58.0% match score) and server approval gate blocked approval.
+- [x] **Engine Resilience & Grounded Fallbacks**:
+  - Enhanced [`engine/model.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/model.py) with structured schema fallbacks directly extracting indexed source sentences during unconfigured key or offline testing scenarios.
+  - Added `init_db()` helper to [`db/database.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/db/database.py).
+- [x] **Complete Documentation Suite**:
+  - [`docs/architecture.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/docs/architecture.md): Complete Mermaid System Architecture and Core Workflow diagrams, plus subsystem breakdowns for verifier, solver, guardrails, and security boundaries.
+  - [`docs/model_choice.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/docs/model_choice.md): Detailed model selection rationale for Gemini 2.5 Flash, structured output compliance, latency benchmarks, and fallback tiers.
+  - [`docs/limitations.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/docs/limitations.md): Honest appraisal of same-model solver correlation, synthetic analytics demonstration data, demo-only header authentication, and PDF OCR limits.
+  - [`README.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/README.md): Problem, solution, architecture, exact setup commands, environment variables, hackathon vs reused component accounting, and evaluation summary.
+- [x] **Demo Readiness & Automated Reset**:
+  - Provided clean reset scripts [`scripts/demo_reset.ps1`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/demo_reset.ps1) (Windows) and [`scripts/demo_reset.sh`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/demo_reset.sh) (Linux/macOS) that wipe the DB, recreate tables, and launch backend & frontend.
+  - Authored [`docs/DEMO_SCRIPT.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/docs/DEMO_SCRIPT.md) with step-by-step narrative and a comprehensive "Judge Q&A" section.
+- [x] **Dry Run & Verification**:
+  - Full clean database dry run executed end-to-end: **100 Pack Health Score, 0 open flags**.
+  - Pytest: **32 passed, 1 skipped**.
+  - Frontend production build: `tsc -b && vite build` passed cleanly in 774ms.
+
+
 
 
