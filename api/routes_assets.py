@@ -457,3 +457,99 @@ def simplify_asset(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Simplification generation failed: {str(e)}",
         )
+
+
+class BloomTagUpdateRequest(BaseModel):
+    bloom_tag: str
+    actor: str = "teacher"
+    reason: Optional[str] = None
+
+
+@router.put("/{asset_id}/bloom-tag")
+def update_bloom_tag(
+    asset_id: int,
+    req: BloomTagUpdateRequest,
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """Teacher overrides Bloom taxonomy tag with mandatory audit logging in DecisionLog."""
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset or not asset.slot:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    old_tag = asset.slot.bloom_tag
+    asset.slot.bloom_tag = req.bloom_tag
+
+    # Log in DecisionLog
+    log_entry = DecisionLog(
+        unit_id=asset.slot.unit_id,
+        asset_id=asset.id,
+        action="override_bloom_tag",
+        actor=req.actor,
+        detail={
+            "old_tag": old_tag,
+            "new_tag": req.bloom_tag,
+            "reason": req.reason or "Teacher pedagogical adjustment",
+        },
+    )
+    db.add(log_entry)
+    db.commit()
+
+    return {
+        "asset_id": asset.id,
+        "slot_id": asset.slot.id,
+        "bloom_tag": asset.slot.bloom_tag,
+        "message": f"Bloom tag updated from {old_tag} to {req.bloom_tag}",
+    }
+
+
+class FlagResolveRequest(BaseModel):
+    action: str = "resolve"  # resolve | override
+    reason: Optional[str] = None
+    actor: str = "teacher"
+
+
+@router.post("/flags/{flag_id}/resolve")
+def resolve_flag(
+    flag_id: int,
+    req: FlagResolveRequest,
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """Resolve or override a quality flag with audit tracking."""
+    flag = db.query(QualityFlag).filter(QualityFlag.id == flag_id).first()
+    if not flag:
+        raise HTTPException(status_code=404, detail="Quality flag not found")
+
+    if req.action == "override" and not req.reason:
+        raise HTTPException(
+            status_code=400,
+            detail="Mandatory reason required when overriding a quality flag.",
+        )
+
+    flag.resolved = True
+    flag.resolved_by = req.actor
+
+    log_entry = DecisionLog(
+        unit_id=flag.unit_id,
+        asset_id=flag.asset_version.asset_id if flag.asset_version else None,
+        action=f"flag_{req.action}",
+        actor=req.actor,
+        detail={
+            "flag_id": flag.id,
+            "code": flag.code,
+            "severity": flag.severity,
+            "message": flag.message,
+            "reason": req.reason,
+        },
+    )
+    db.add(log_entry)
+    db.commit()
+
+    return {
+        "flag_id": flag.id,
+        "resolved": True,
+        "resolved_by": flag.resolved_by,
+        "message": f"Flag {flag.code} successfully {req.action}d.",
+    }
+

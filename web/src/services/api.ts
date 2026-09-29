@@ -168,6 +168,29 @@ export const api = {
     return request(`/units/${unitId}/health`);
   },
 
+  async getUnitSourceText(unitId: number): Promise<{
+    unit_id: number;
+    source_id: number;
+    source_version_id: number;
+    version_no: number;
+    sha256: string;
+    full_text: string;
+    chunks: Array<{
+      id: number;
+      idx: number;
+      char_start: number;
+      char_end: number;
+      page?: number;
+      text: string;
+    }>;
+  }> {
+    return request(`/units/${unitId}/source-text`);
+  },
+
+  async getUnitAudit(unitId: number): Promise<any> {
+    return request(`/units/${unitId}/audit`);
+  },
+
   // Assets
   async updateAssetStatus(assetId: number, data: {
     status: string;
@@ -177,6 +200,30 @@ export const api = {
     override_reason?: string;
   }): Promise<Asset> {
     return request(`/assets/${assetId}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateBloomTag(assetId: number, data: {
+    bloom_tag: string;
+    actor?: string;
+    reason?: string;
+  }): Promise<{ asset_id: number; slot_id: number; bloom_tag: string; message: string }> {
+    return request(`/assets/${assetId}/bloom-tag`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  },
+
+  async resolveFlag(flagId: number, data: {
+    action: 'resolve' | 'override';
+    reason?: string;
+    actor?: string;
+  }): Promise<{ flag_id: number; resolved: boolean; resolved_by?: string; message: string }> {
+    return request(`/assets/flags/${flagId}/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),

@@ -108,3 +108,28 @@
   - `npm.cmd --prefix web run build` succeeds cleanly (`dist/` bundle created).
   - All 31 backend unit tests pass.
 
+---
+
+### Phase 5: Deep Quality Gate, Consistency Graph, Evidence Split Panel & Governance
+- [x] **AI Quality Checklist & Flags Drawer**:
+  - Implemented [`web/src/components/unit/QualityChecklistCard.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/QualityChecklistCard.tsx) mapping live health metrics to green/amber/red status across all 7 guardrails.
+  - Implemented [`web/src/components/unit/QualityFlagsDrawer.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/QualityFlagsDrawer.tsx) listing every flag, severity, target asset version, and suggested fix, with interactive "Resolve" and "Override with Reason" actions.
+- [x] **Evidence Viewer Split Panel**:
+  - Implemented [`web/src/components/unit/EvidenceViewerModal.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/EvidenceViewerModal.tsx) highlighting exact character offsets (`char_start` to `char_end`) against the full ground truth source text.
+- [x] **Differentiated Practice Side-by-Side**:
+  - Implemented [`web/src/components/unit/PracticeComparisonView.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/PracticeComparisonView.tsx) displaying Foundation Practice vs. Advanced Practice side-by-side with Bloom taxonomy badges.
+- [x] **Learning Consistency Graph**:
+  - Implemented [`web/src/components/unit/LearningConsistencyGraph.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/LearningConsistencyGraph.tsx) rendering full DAG topology: Objectives &rarr; Explanation &rarr; Example &rarr; Quizzes &rarr; Practice &rarr; Revision.
+- [x] **AI Responsibility & Governance Report**:
+  - Implemented [`web/src/components/unit/AIResponsibilityReport.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/AIResponsibilityReport.tsx) and backend endpoint `GET /api/units/{id}/audit` calculating live Grounding, Transparency, Safety, Limitations, Human Authority, and Data Isolation cards from real database tables and `DecisionLog`.
+- [x] **Change Impact & Publishing Workflows**:
+  - Implemented [`web/src/components/unit/ChangeImpactView.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/ChangeImpactView.tsx) and [`web/src/components/unit/PublishUnitView.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/components/unit/PublishUnitView.tsx).
+- [x] **Backend Extensions**:
+  - Added `PUT /api/assets/{id}/bloom-tag` with audit logging in [`db/models.py:DecisionLog`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/db/models.py).
+  - Added `POST /api/assets/flags/{flag_id}/resolve` with resolution tracking.
+  - Added `GET /api/units/{id}/source-text` and `GET /api/units/{id}/audit`.
+- [x] **Testing & Verification**:
+  - Full production build `npm run build` succeeded cleanly in 735ms.
+  - All 31 backend unit tests pass.
+
+

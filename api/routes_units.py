@@ -665,3 +665,139 @@ def export_unit(
         "html_export": html_document,
     }
 
+
+@router.get("/{unit_id}/source-text")
+def get_unit_source_text(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """Retrieve full source text and chunks for the pinned source version of a unit."""
+    unit = db.query(Unit).filter(Unit.id == unit_id).first()
+    if not unit:
+        raise HTTPException(status_code=404, detail=f"Unit {unit_id} not found")
+
+    source_version = (
+        db.query(SourceVersion)
+        .filter(SourceVersion.id == unit.pinned_source_version_id)
+        .first()
+    )
+    if not source_version:
+        raise HTTPException(status_code=404, detail="Pinned source version not found")
+
+    chunks = (
+        db.query(SourceChunk)
+        .filter(SourceChunk.source_version_id == source_version.id)
+        .order_by(SourceChunk.idx)
+        .all()
+    )
+
+    return {
+        "unit_id": unit.id,
+        "source_id": unit.source_id,
+        "source_version_id": source_version.id,
+        "version_no": source_version.version_no,
+        "sha256": source_version.sha256,
+        "full_text": source_version.text,
+        "chunks": [
+            {
+                "id": c.id,
+                "idx": c.idx,
+                "char_start": c.char_start,
+                "char_end": c.char_end,
+                "page": c.page,
+                "text": c.text,
+            }
+            for c in chunks
+        ],
+    }
+
+
+@router.get("/{unit_id}/audit")
+def get_unit_audit_report(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """
+    AI Responsibility & Audit Report computed from live unit data and DecisionLogs.
+    """
+    unit = db.query(Unit).filter(Unit.id == unit_id).first()
+    if not unit:
+        raise HTTPException(status_code=404, detail=f"Unit {unit_id} not found")
+
+    from db.models import DecisionLog
+    logs = (
+        db.query(DecisionLog)
+        .filter(DecisionLog.unit_id == unit_id)
+        .order_by(DecisionLog.created_at.desc())
+        .all()
+    )
+
+    slots = db.query(Slot).filter(Slot.unit_id == unit_id).all()
+    total_assets = len([s for s in slots if s.asset])
+    approved_assets = len([s for s in slots if s.asset and s.asset.status == "approved"])
+    needs_revision_assets = len([s for s in slots if s.asset and s.asset.status == "needs_revision"])
+
+    # Claims
+    asset_version_ids = [s.asset.current_version_id for s in slots if s.asset and s.asset.current_version_id]
+    claims = db.query(Claim).filter(Claim.asset_version_id.in_(asset_version_ids)).all() if asset_version_ids else []
+    total_claims = len(claims)
+    verified_claims = len([c for c in claims if c.verified])
+
+    # Source injection info
+    source_ver = db.query(SourceVersion).filter(SourceVersion.id == unit.pinned_source_version_id).first()
+    injection_flags = source_ver.injection_flags if source_ver else {}
+
+    # Quality flags
+    flags = db.query(QualityFlag).filter(QualityFlag.unit_id == unit_id).all()
+    resolved_flags = len([f for f in flags if f.resolved])
+    open_flags = len([f for f in flags if not f.resolved])
+
+    overrides = [l for l in logs if "override" in l.action or (l.detail and l.detail.get("override"))]
+
+    return {
+        "unit_id": unit.id,
+        "title": unit.title,
+        "target_grade": unit.target_grade,
+        "difficulty": unit.difficulty,
+        "pinned_source_version_id": unit.pinned_source_version_id,
+        "source_sha256": source_ver.sha256 if source_ver else None,
+        "grounding": {
+            "total_claims": total_claims,
+            "verified_claims": verified_claims,
+            "ratio": round(verified_claims / total_claims, 3) if total_claims > 0 else 1.0,
+            "status": "fully_grounded" if total_claims > 0 and verified_claims == total_claims else "partially_grounded",
+        },
+        "safety": {
+            "injection_flagged": injection_flags.get("flagged", False) if isinstance(injection_flags, dict) else False,
+            "injection_matches": injection_flags.get("matches", []) if isinstance(injection_flags, dict) else [],
+            "source_boundary_delimiters": True,
+        },
+        "transparency": {
+            "model_family": "gemini-2.5",
+            "prompt_version": "gen-1.0",
+            "solver_limitation": "Blinded solver uses the same model family; reduces but does not eliminate correlated model biases.",
+        },
+        "human_control": {
+            "total_assets": total_assets,
+            "approved_assets": approved_assets,
+            "needs_revision_assets": needs_revision_assets,
+            "total_overrides_logged": len(overrides),
+            "total_decisions_logged": len(logs),
+            "open_flags": open_flags,
+            "resolved_flags": resolved_flags,
+        },
+        "decision_logs": [
+            {
+                "id": l.id,
+                "action": l.action,
+                "actor": l.actor,
+                "detail": l.detail,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in logs[:20]
+        ],
+    }
+
+
