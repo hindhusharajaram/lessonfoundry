@@ -214,6 +214,31 @@
     - Frontend Build: `npm run build` (`tsc -b && vite build`) passed with **0 errors**.
     - Live Endpoint Verification: Manually hit `GET http://127.0.0.1:8000/api/units/1/impact?change=difficulty:medium->advanced` on the running dev server, confirming live JSON response with 14 affected items and 6 unaffected items.
 
+---
+
+## Interactive Sentence Claim Inspection & Grounding Popover
+
+### 1. Audit Findings (Already Existed vs Newly Built)
+
+- **Already Existed**:
+  - **Database Claims & Verification Fields**: [`Claim`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/db/models.py) entity already stored `text`, `source_quote`, `verified`, `match_score`, `chunk_id`, `char_start`, and `char_end`.
+  - **Full Textbook Evidence Modal**: `EvidenceViewerModal.tsx` existed to show the complete source document with character offset highlighting.
+  - **Static Evidence Buttons**: Small buttons existed adjacent to sentences.
+
+- **Newly Built / Enhanced**:
+  - **Distinct Interactive Claim Spans (`renderClaimSpan`)**: Integrated interactive `<span>` rendering across all generated asset views in [`web/src/pages/teacher/UnitPackPage.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/pages/teacher/UnitPackPage.tsx) (Explanations, Worked Examples, Quiz Items, Practice Items, and Revision Key Points).
+  - **Visual Unverified Warning Indication**: Unverified claims (`verified=false`) are styled with a visually distinct warning treatment (`border-b-2 border-dashed border-rose-500 bg-rose-50 text-rose-950 font-medium` and an `Unverified` tag), making them immediately noticeable to educators without requiring prior clicks.
+  - **Instant Grounding Popover / Side Panel**: Clicking on any sentence/claim activates an instant grounding panel displaying:
+    - Verification Status badge with exact percentage match (`Verified Ground Truth (100.0% match)` vs `Unverified`).
+    - Source Chunk reference (`Source Chunk #N`).
+    - Verbatim Source Quote formatted in a distinct monospaced highlight box.
+    - Character span offsets `[char_start : char_end]`.
+    - One-click shortcut to open the full textbook view with context highlighting.
+  - **Manual & Automated Verification**:
+    - Confirmed live against SQLite database for Unit #1 (`GET /api/units/1/pack`), retrieving real verified claim quotes and chunk IDs (e.g., Chunk #3, Chunk #4).
+    - Production build: `npm run build` (`tsc -b && vite build`) passed cleanly with **0 errors**.
+
+
 
 
 

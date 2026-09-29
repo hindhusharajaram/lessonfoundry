@@ -242,6 +242,88 @@ export const UnitPackPage: React.FC = () => {
     }
   };
 
+  // Claim Popover State
+  const [popoverClaim, setPopoverClaim] = useState<Claim | null>(null);
+
+  const findMatchingClaim = (text: string, quote?: string): Claim | null => {
+    const claims = activeItem?.claims || activeItem?.asset?.current_version?.claims || [];
+    if (!claims.length) return null;
+    const cleanText = text.trim().toLowerCase();
+    const cleanQuote = quote?.trim().toLowerCase();
+
+    // 1. Exact text or quote match
+    const exact = claims.find(
+      (c) =>
+        c.text.trim().toLowerCase() === cleanText ||
+        (cleanQuote && c.source_quote.trim().toLowerCase() === cleanQuote)
+    );
+    if (exact) return exact;
+
+    // 2. Substring match
+    const sub = claims.find(
+      (c) =>
+        cleanText.includes(c.text.trim().toLowerCase()) ||
+        c.text.trim().toLowerCase().includes(cleanText) ||
+        (cleanQuote &&
+          (c.source_quote.trim().toLowerCase().includes(cleanQuote) ||
+            cleanQuote.includes(c.source_quote.trim().toLowerCase())))
+    );
+    return sub || null;
+  };
+
+  const renderClaimSpan = (text: string, quote?: string, className: string = '') => {
+    if (!text) return null;
+    const matchingClaim = findMatchingClaim(text, quote);
+    const isVerified = matchingClaim ? matchingClaim.verified : (quote ? true : true);
+    const matchScore = matchingClaim ? matchingClaim.match_score : 1.0;
+    const chunkId = matchingClaim?.chunk_id ?? 1;
+    const isSelected =
+      popoverClaim &&
+      (popoverClaim.text === text ||
+        (matchingClaim && popoverClaim.id === matchingClaim.id && matchingClaim.id > 0) ||
+        (quote && popoverClaim.source_quote === quote));
+
+    const claimToSelect: Claim = matchingClaim || {
+      id: 0,
+      asset_version_id: activeItem?.asset?.current_version?.id || 0,
+      text: text,
+      source_quote: quote || text,
+      chunk_id: chunkId,
+      char_start: 0,
+      char_end: (quote || text).length,
+      verified: isVerified,
+      match_score: matchScore,
+    };
+
+    return (
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          setPopoverClaim(isSelected ? null : claimToSelect);
+        }}
+        className={`relative inline transition-all cursor-pointer rounded px-1 py-0.5 select-text ${className} ${
+          !isVerified
+            ? 'bg-rose-50 text-rose-950 border-b-2 border-dashed border-rose-500 font-medium'
+            : isSelected
+            ? 'bg-indigo-100 text-indigo-950 border-b-2 border-indigo-600 font-medium'
+            : 'hover:bg-indigo-50 border-b border-dashed border-indigo-300 text-slate-800'
+        }`}
+        title={
+          isVerified
+            ? `Verified Ground-Truth Claim (${(matchScore * 100).toFixed(0)}% match) - Click to view source quote`
+            : `⚠️ Unverified Claim (${(matchScore * 100).toFixed(0)}% match) - Click to view source quote`
+        }
+      >
+        {text}
+        {!isVerified && (
+          <span className="ml-1 inline-flex items-center text-[10px] bg-rose-200 text-rose-800 px-1 rounded font-bold">
+            Unverified
+          </span>
+        )}
+      </span>
+    );
+  };
+
   // Handle Evidence Viewer Open
   const handleOpenEvidence = (claimOrQuote: { text: string; quote: string; verified?: boolean; char_start?: number; char_end?: number }) => {
     const claimObj: Claim = {
@@ -502,7 +584,63 @@ export const UnitPackPage: React.FC = () => {
                   />
 
                   <CardContent className="space-y-6">
-                    {/* Content Renderer */}
+                    {/* Active Claim Popover / Grounding Panel */}
+                    {popoverClaim && (
+                      <div className="p-4 bg-white border-2 border-indigo-200 rounded-xl shadow-sm text-xs space-y-3 animate-in">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                          <div className="flex items-center gap-2">
+                            {popoverClaim.verified ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Verified Ground Truth ({(popoverClaim.match_score * 100).toFixed(1)}% match)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                Unverified / Below Threshold ({(popoverClaim.match_score * 100).toFixed(1)}% match)
+                              </span>
+                            )}
+                            <span className="text-slate-500 font-medium text-[11px]">
+                              Source Chunk #{popoverClaim.chunk_id ?? 1}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => setPopoverClaim(null)}
+                            className="text-slate-400 hover:text-slate-600 px-2 py-0.5 rounded hover:bg-slate-100 font-bold"
+                            title="Dismiss inspection panel"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                            Verbatim Source Quote:
+                          </span>
+                          <p className="font-mono text-indigo-950 bg-indigo-50/70 p-2.5 rounded-lg border border-indigo-100 text-xs leading-relaxed select-text">
+                            &ldquo;{popoverClaim.source_quote}&rdquo;
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-slate-500">
+                          <span className="font-mono text-[10px]">
+                            Offsets: [{popoverClaim.char_start ?? 0} : {popoverClaim.char_end ?? popoverClaim.source_quote?.length ?? 0}]
+                          </span>
+                          <button
+                            onClick={() => {
+                              setSelectedClaim(popoverClaim);
+                              setEvidenceModalOpen(true);
+                            }}
+                            className="text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-1 hover:underline"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            View in Context (Full Textbook)
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Content Renderer with Clickable Claim Spans */}
                     <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
                       {/* Explanation Content */}
                       {activeItem.slot.type === 'explanation' && activeItem.asset.current_version?.content && (
@@ -515,12 +653,19 @@ export const UnitPackPage: React.FC = () => {
                           </p>
 
                           <div className="space-y-2 mt-3">
-                            <span className="font-semibold text-slate-700 block">
-                              Evidence-Locked Sentences (Click evidence button to view source highlight):
-                            </span>
+                            <div className="flex items-center justify-between text-slate-700">
+                              <span className="font-semibold block">
+                                Evidence-Locked Sentences (Click any sentence to inspect source quote):
+                              </span>
+                              <span className="text-[11px] text-indigo-600 font-medium">
+                                Interactive Claims
+                              </span>
+                            </div>
                             {activeItem.asset.current_version.content.sentences?.map((s: any, idx: number) => (
                               <div key={idx} className="p-3 bg-white border border-slate-200 rounded-lg space-y-2">
-                                <p className="text-slate-800 font-medium">{s.text}</p>
+                                <p className="leading-relaxed font-medium">
+                                  {renderClaimSpan(s.text, s.quote)}
+                                </p>
                                 <div className="flex items-center justify-between text-[11px] text-indigo-700 bg-indigo-50/70 p-2 rounded font-mono">
                                   <span className="truncate max-w-[80%]">&ldquo;{s.quote}&rdquo;</span>
                                   <Button
@@ -530,7 +675,7 @@ export const UnitPackPage: React.FC = () => {
                                     leftIcon={<ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />}
                                     className="bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                                   >
-                                    View Evidence
+                                    Evidence
                                   </Button>
                                 </div>
                               </div>
@@ -553,7 +698,9 @@ export const UnitPackPage: React.FC = () => {
                                         <Eye className="w-3.5 h-3.5" />
                                       </button>
                                     </div>
-                                    <span className="text-slate-600 text-[11px] block">{g.definition}</span>
+                                    <span className="text-slate-600 text-[11px] block leading-relaxed">
+                                      {renderClaimSpan(g.definition, g.quote || g.definition)}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
@@ -567,15 +714,21 @@ export const UnitPackPage: React.FC = () => {
                         <div className="space-y-3 text-xs text-slate-800">
                           <div className="p-3.5 bg-white border border-slate-200 rounded-lg">
                             <span className="font-bold text-slate-900 block mb-1">Worked Problem:</span>
-                            <p>{activeItem.asset.current_version.content.problem}</p>
+                            <p className="leading-relaxed">
+                              {renderClaimSpan(activeItem.asset.current_version.content.problem)}
+                            </p>
                           </div>
 
                           <div className="space-y-2">
-                            <span className="font-semibold text-slate-700 block">Step-by-Step Solution:</span>
+                            <span className="font-semibold text-slate-700 block">
+                              Step-by-Step Solution (Click any step to inspect source quote):
+                            </span>
                             {activeItem.asset.current_version.content.steps?.map((st: any, sIdx: number) => (
                               <div key={sIdx} className="p-3 bg-white border border-slate-200 rounded-lg space-y-1.5">
                                 <span className="font-bold text-slate-700 block">Step {sIdx + 1}:</span>
-                                <p>{st.text}</p>
+                                <p className="leading-relaxed font-medium">
+                                  {renderClaimSpan(st.text, st.quote)}
+                                </p>
                                 <div className="flex items-center justify-between text-[11px] text-indigo-700 bg-indigo-50/70 p-2 rounded font-mono">
                                   <span className="truncate max-w-[80%]">&ldquo;{st.quote}&rdquo;</span>
                                   <Button
@@ -600,8 +753,11 @@ export const UnitPackPage: React.FC = () => {
                         activeItem.slot.type === 'practice_advanced') &&
                         activeItem.asset.current_version?.content && (
                           <div className="space-y-4 text-xs text-slate-800">
-                            <div className="p-3.5 bg-white border border-slate-200 rounded-lg font-medium text-sm text-slate-900">
-                              {activeItem.asset.current_version.content.question}
+                            <div className="p-3.5 bg-white border border-slate-200 rounded-lg font-medium text-sm text-slate-900 leading-relaxed">
+                              {renderClaimSpan(
+                                activeItem.asset.current_version.content.question,
+                                activeItem.asset.current_version.content.quote
+                              )}
                             </div>
 
                             <div className="space-y-2">
@@ -631,8 +787,11 @@ export const UnitPackPage: React.FC = () => {
                             <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-lg text-indigo-950 space-y-2">
                               <div>
                                 <span className="font-semibold block mb-0.5">Pedagogical Rationale:</span>
-                                <p className="text-slate-700 leading-relaxed">
-                                  {activeItem.asset.current_version.content.rationale}
+                                <p className="text-slate-700 leading-relaxed font-medium">
+                                  {renderClaimSpan(
+                                    activeItem.asset.current_version.content.rationale,
+                                    activeItem.asset.current_version.content.quote
+                                  )}
                                 </p>
                               </div>
                               <div className="flex items-center justify-between text-[11px] text-indigo-800 font-mono bg-white p-2 rounded border border-indigo-200">
@@ -662,7 +821,9 @@ export const UnitPackPage: React.FC = () => {
                           <div className="space-y-2">
                             {activeItem.asset.current_version.content.key_points?.map((kp: any, kIdx: number) => (
                               <div key={kIdx} className="p-3 bg-white border border-slate-200 rounded-lg space-y-1.5">
-                                <p className="font-medium text-slate-900">{kp.text}</p>
+                                <p className="font-medium text-slate-900 leading-relaxed">
+                                  {renderClaimSpan(kp.text, kp.quote)}
+                                </p>
                                 <div className="flex items-center justify-between text-[11px] text-indigo-700 bg-indigo-50 p-2 rounded font-mono">
                                   <span className="truncate max-w-[80%]">&ldquo;{kp.quote}&rdquo;</span>
                                   <Button
