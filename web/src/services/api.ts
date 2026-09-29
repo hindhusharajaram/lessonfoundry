@@ -8,6 +8,8 @@ import {
   PackHealth,
   Asset,
   AssetVersion,
+  Claim,
+  QualityFlag,
   Role,
 } from '../types';
 
@@ -60,6 +62,232 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 }
 
+// Normalization Helpers
+function normalizeUploadResponse(raw: any): {
+  source: Source;
+  version: SourceVersion;
+  chunks_created: number;
+  flagged: boolean;
+  flags: any[];
+} {
+  const isFlagged = Boolean(raw.injection_flags?.flagged || raw.flagged);
+  const flagsList = raw.injection_flags?.matches || raw.flags || [];
+  const sourceId = raw.source_id || raw.source?.id || 1;
+  const versionId = raw.source_version_id || raw.version?.id || 1;
+  const versionNo = raw.version_no || raw.version?.version_no || 1;
+
+  return {
+    source: {
+      id: sourceId,
+      title: raw.source_title || raw.source?.title || 'Source Document',
+      filename: raw.source?.filename || raw.filename || 'source.txt',
+      created_at: raw.source?.created_at || new Date().toISOString(),
+    },
+    version: {
+      id: versionId,
+      source_id: sourceId,
+      version_no: versionNo,
+      text: raw.text || raw.version?.text || '',
+      sha256: raw.sha256 || raw.version?.sha256 || '',
+      injection_flags: flagsList,
+      uploaded_at: raw.uploaded_at || raw.version?.uploaded_at || new Date().toISOString(),
+      chunk_count: raw.chunks_count ?? raw.version?.chunk_count ?? 0,
+    },
+    chunks_created: raw.chunks_count ?? raw.chunks_created ?? 0,
+    flagged: isFlagged,
+    flags: flagsList,
+  };
+}
+
+function normalizeUnitResponse(raw: any): Unit {
+  return {
+    id: raw.id ?? raw.unit_id,
+    title: raw.title,
+    source_id: raw.source_id,
+    pinned_source_version_id: raw.pinned_source_version_id,
+    target_grade: raw.target_grade,
+    difficulty: raw.difficulty,
+    language: raw.language,
+    answer_visibility: raw.answer_visibility || 'after_submission',
+    constraints: raw.constraints || {},
+    quiz_count: raw.quiz_count,
+    status: raw.status,
+    created_at: raw.created_at || new Date().toISOString(),
+    objectives: raw.objectives || [],
+    slots: raw.slots || [],
+  };
+}
+
+function normalizeHealthResponse(raw: any): PackHealth {
+  if (!raw) {
+    return {
+      unit_id: 0,
+      score: 0,
+      grounding_ratio: 1.0,
+      solver_verification_rate: 1.0,
+      duplicate_count: 0,
+      total_claims: 0,
+      verified_claims: 0,
+      total_questions: 0,
+      verified_questions: 0,
+      objective_coverage: {},
+      bloom_distribution: {},
+      open_flags_by_severity: { error: 0, warning: 0, info: 0 },
+      flags: [],
+    };
+  }
+
+  const groundingPct = typeof raw.grounding_percentage === 'number'
+    ? raw.grounding_percentage
+    : (typeof raw.grounding_ratio === 'number' ? raw.grounding_ratio : 100.0);
+  const groundingRatio = groundingPct > 1.0 ? groundingPct / 100.0 : groundingPct;
+
+  const solverPct = typeof raw.solver_verification_rate === 'number'
+    ? raw.solver_verification_rate
+    : 1.0;
+  const solverRatio = solverPct > 1.0 ? solverPct / 100.0 : solverPct;
+
+  const openFlagsRaw = raw.open_flags || raw.flags || [];
+  const flags = openFlagsRaw.map((f: any) => ({
+    id: f.id,
+    unit_id: f.unit_id || raw.unit_id,
+    asset_version_id: f.asset_version_id,
+    code: f.code,
+    severity: f.severity,
+    message: f.message,
+    resolved: f.resolved ?? false,
+    created_at: f.created_at || new Date().toISOString(),
+  }));
+
+  const openFlagsCount = raw.open_flags_count || {};
+
+  return {
+    unit_id: raw.unit_id,
+    score: raw.health_score ?? raw.score ?? 0,
+    grounding_ratio: groundingRatio,
+    solver_verification_rate: solverRatio,
+    duplicate_count: raw.duplicate_count ?? 0,
+    total_claims: raw.total_claims ?? 0,
+    verified_claims: raw.verified_claims ?? 0,
+    total_questions: raw.total_quiz_slots ?? raw.total_questions ?? 0,
+    verified_questions: raw.solver_matched_slots ?? raw.verified_questions ?? 0,
+    objective_coverage: raw.objective_coverage ?? {},
+    bloom_distribution: raw.bloom_distribution ?? {},
+    open_flags_by_severity: {
+      error: openFlagsCount.error ?? raw.open_flags_by_severity?.error ?? 0,
+      warning: openFlagsCount.warning ?? raw.open_flags_by_severity?.warning ?? 0,
+      info: openFlagsCount.info ?? raw.open_flags_by_severity?.info ?? 0,
+    },
+    flags,
+  };
+}
+
+function normalizePackResponse(raw: any, healthData?: PackHealth): LearningPack {
+  const unitId = raw.unit_id || raw.unit?.id || 0;
+  const rawObjectives = raw.objectives || raw.by_objective || [];
+
+  const byObjective = rawObjectives.map((objItem: any) => {
+    const objectiveId: number = objItem.objective_id || objItem.objective?.id || objItem.id || 0;
+    const objective: Objective = {
+      id: objectiveId,
+      unit_id: unitId,
+      position: objItem.position || objItem.objective?.position || 1,
+      text: objItem.text || objItem.objective?.text || '',
+      bloom_target: objItem.bloom_target || objItem.objective?.bloom_target || 'understand',
+      supported: objItem.supported ?? objItem.objective?.supported ?? true,
+      support_note: objItem.support_note ?? objItem.objective?.support_note ?? null,
+    };
+
+    const slots = (objItem.slots || []).map((s: any) => {
+      // If s already matches frontend slot structure
+      if (s.slot) {
+        return s;
+      }
+
+      const slotObj: Slot = {
+        id: s.slot_id ?? s.id,
+        unit_id: unitId,
+        objective_id: objectiveId,
+        objective_position: s.objective_position || objective.position,
+        objective_text: s.objective_text || objective.text,
+        type: s.type,
+        position: s.position,
+        difficulty: s.difficulty,
+        bloom_tag: s.bloom_tag,
+      };
+
+      const assetObj: Asset | null = s.asset ? {
+        id: s.asset.asset_id ?? s.asset.id,
+        slot_id: slotObj.id,
+        status: s.asset.status,
+        locked: s.asset.locked ?? false,
+        current_version_id: s.asset.version_no ?? s.asset.current_version_id ?? 1,
+        current_version: s.asset.current_version || {
+          id: s.asset.version_no ?? 1,
+          asset_id: s.asset.asset_id ?? s.asset.id,
+          version_no: s.asset.version_no ?? 1,
+          variant: 'standard',
+          content: s.asset.content,
+          model: s.asset.model || 'gemini-2.5-flash',
+          prompt_version: '1.0',
+          settings: {},
+          source_version_id: 1,
+          source_sha256: '',
+          verification: s.asset.verification,
+          created_at: new Date().toISOString(),
+          claims: s.asset.claims || [],
+        },
+      } : null;
+
+      const claimsList: Claim[] = s.asset?.claims || s.claims || [];
+      const flagsList: QualityFlag[] = (raw.quality_flags || []).filter(
+        (qf: any) => qf.asset_version_id === (s.asset?.version_no || s.asset?.current_version_id)
+      );
+
+      return {
+        slot: slotObj,
+        asset: assetObj,
+        claims: claimsList,
+        flags: flagsList,
+      };
+    });
+
+    return {
+      objective,
+      slots,
+    };
+  });
+
+  const unit: Unit = {
+    id: unitId,
+    title: raw.title || raw.unit?.title || 'Learning Pack',
+    source_id: raw.source_id || raw.unit?.source_id || 0,
+    pinned_source_version_id: raw.pinned_source_version_id || raw.unit?.pinned_source_version_id || 0,
+    target_grade: raw.target_grade || raw.unit?.target_grade || '',
+    difficulty: raw.difficulty || raw.unit?.difficulty || 'medium',
+    language: raw.language || raw.unit?.language || 'English',
+    answer_visibility: raw.answer_visibility || raw.unit?.answer_visibility || 'after_submission',
+    constraints: raw.constraints || raw.unit?.constraints || {},
+    quiz_count: raw.quiz_count || raw.unit?.quiz_count || 0,
+    status: raw.status || raw.unit?.status || 'draft',
+    created_at: raw.created_at || raw.unit?.created_at || new Date().toISOString(),
+  };
+
+  const health: PackHealth = healthData || normalizeHealthResponse(raw.health || {
+    unit_id: unitId,
+    total_claims: raw.total_claims ?? 0,
+    verified_claims: raw.verified_claims ?? 0,
+    grounding_ratio: raw.overall_verification_ratio ?? 1.0,
+    flags: raw.quality_flags || [],
+  });
+
+  return {
+    unit,
+    health,
+    by_objective: byObjective,
+  };
+}
+
 export const api = {
   // Sources
   async uploadSource(params: { file?: File; title?: string; text?: string }): Promise<{
@@ -90,7 +318,8 @@ export const api = {
       const err = await response.json().catch(() => ({ detail: response.statusText }));
       throw new ApiError(response.status, err.detail || 'Failed to upload source', err);
     }
-    return response.json();
+    const raw = await response.json();
+    return normalizeUploadResponse(raw);
   },
 
   async getSourceVersions(sourceId: number): Promise<{
@@ -112,20 +341,23 @@ export const api = {
     constraints?: Record<string, any>;
     quiz_count?: number;
   }): Promise<Unit> {
-    return request('/units', {
+    const raw = await request('/units', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    return normalizeUnitResponse(raw);
   },
 
   async listUnits(): Promise<Unit[]> {
     const res: any = await request('/units');
-    return Array.isArray(res) ? res : res?.units || [];
+    const rawList = Array.isArray(res) ? res : res?.units || [];
+    return rawList.map(normalizeUnitResponse);
   },
 
   async getUnit(unitId: number): Promise<Unit> {
-    return request(`/units/${unitId}`);
+    const raw = await request(`/units/${unitId}`);
+    return normalizeUnitResponse(raw);
   },
 
   async updateObjectives(unitId: number, objectives: Array<{ text: string; bloom_target?: string | null }>): Promise<{
@@ -145,9 +377,31 @@ export const api = {
     slots_created: number;
     slots: Slot[];
   }> {
-    return request(`/units/${unitId}/plan`, {
+    const planRes: any = await request(`/units/${unitId}/plan`, {
       method: 'POST',
     });
+
+    // Follow-up GET /api/units/{id} to get objectives with supported status
+    const unitDetails = await api.getUnit(unitId);
+
+    const slots: Slot[] = (planRes.blueprint || []).map((bp: any) => ({
+      id: bp.slot_id,
+      unit_id: unitId,
+      objective_id: bp.objective_id,
+      objective_position: bp.objective_position,
+      objective_text: bp.objective_text,
+      type: bp.type,
+      position: bp.position,
+      difficulty: bp.difficulty,
+      bloom_tag: bp.bloom_tag,
+    }));
+
+    return {
+      unit_id: unitId,
+      objectives: unitDetails.objectives || [],
+      slots_created: planRes.slots_count ?? slots.length,
+      slots,
+    };
   },
 
   async generatePack(unitId: number): Promise<{
@@ -162,11 +416,16 @@ export const api = {
   },
 
   async getLearningPack(unitId: number): Promise<LearningPack> {
-    return request(`/units/${unitId}/pack`);
+    const [rawPack, healthData] = await Promise.all([
+      request<any>(`/units/${unitId}/pack`),
+      api.getUnitHealth(unitId).catch(() => undefined),
+    ]);
+    return normalizePackResponse(rawPack, healthData);
   },
 
   async getUnitHealth(unitId: number): Promise<PackHealth> {
-    return request(`/units/${unitId}/health`);
+    const raw = await request(`/units/${unitId}/health`);
+    return normalizeHealthResponse(raw);
   },
 
   async getUnitSourceText(unitId: number): Promise<{
@@ -193,6 +452,10 @@ export const api = {
   },
 
   // Assets
+  async getAssetDetail(assetId: number): Promise<any> {
+    return request(`/assets/${assetId}`);
+  },
+
   async updateAssetStatus(assetId: number, data: {
     status: string;
     actor: string;
@@ -371,6 +634,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-  }
+  },
+
+  async getHealth(): Promise<{ status: string; app: string; version: string }> {
+    return request('/health');
+  },
 };
 

@@ -129,9 +129,55 @@ export const UnitPackPage: React.FC = () => {
     }
   };
 
+  const [detailedActiveAsset, setDetailedActiveAsset] = useState<any>(null);
+  const [assetLoading, setAssetLoading] = useState<boolean>(false);
+  const [assetError, setAssetError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchDetailedAsset() {
+      if (!selectedSlotId || !pack) return;
+      const allItems = pack.by_objective?.flatMap((o) => o.slots) || [];
+      const item = allItems.find(i => i.slot.id === selectedSlotId);
+      if (!item || !item.asset) {
+        setDetailedActiveAsset(null);
+        return;
+      }
+
+      try {
+        setAssetLoading(true);
+        setAssetError(null);
+        const detail = await api.getAssetDetail(item.asset.id);
+        setDetailedActiveAsset(detail);
+      } catch (err: any) {
+        setAssetError(err.message || 'Failed to load asset details');
+        setDetailedActiveAsset(null);
+      } finally {
+        setAssetLoading(false);
+      }
+    }
+    fetchDetailedAsset();
+  }, [selectedSlotId, pack]);
+
   // Find currently active item
   const allSlotItems = pack?.by_objective?.flatMap((o) => o.slots) || [];
-  const activeItem = allSlotItems.find((item) => item.slot.id === selectedSlotId) || allSlotItems[0];
+  let baseActiveItem = allSlotItems.find((item) => item.slot.id === selectedSlotId) || allSlotItems[0];
+  const activeItem = React.useMemo(() => {
+    if (!baseActiveItem) return baseActiveItem;
+    if (baseActiveItem.asset && detailedActiveAsset && detailedActiveAsset.asset_id === baseActiveItem.asset.id) {
+      return {
+        ...baseActiveItem,
+        asset: {
+          ...baseActiveItem.asset,
+          current_version: {
+            ...baseActiveItem.asset.current_version,
+            content: detailedActiveAsset.content,
+            claims: detailedActiveAsset.claims,
+          }
+        }
+      };
+    }
+    return baseActiveItem;
+  }, [baseActiveItem, detailedActiveAsset]);
 
   // Find companion practice items for side-by-side view
   const foundationPracticeItem = allSlotItems.find((item) => item.slot.type === 'practice_foundation');
@@ -280,13 +326,12 @@ export const UnitPackPage: React.FC = () => {
           e.stopPropagation();
           setPopoverClaim(isSelected ? null : claimToSelect);
         }}
-        className={`relative inline transition-all cursor-pointer rounded px-1 py-0.5 select-text ${className} ${
-          !isVerified
+        className={`relative inline transition-all cursor-pointer rounded px-1 py-0.5 select-text ${className} ${!isVerified
             ? 'bg-rose-50 text-rose-950 border-b-2 border-dashed border-rose-500 font-medium'
             : isSelected
-            ? 'bg-indigo-100 text-indigo-950 border-b-2 border-indigo-600 font-medium'
-            : 'hover:bg-indigo-50 border-b border-dashed border-indigo-300 text-slate-800'
-        }`}
+              ? 'bg-indigo-100 text-indigo-950 border-b-2 border-indigo-600 font-medium'
+              : 'hover:bg-indigo-50 border-b border-dashed border-indigo-300 text-slate-800'
+          }`}
         title={
           isVerified
             ? `Verified Ground-Truth Claim (${(matchScore * 100).toFixed(0)}% match) - Click to view source quote`
@@ -355,51 +400,46 @@ export const UnitPackPage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1 rounded-xl">
             <button
               onClick={() => setActiveTab('review')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'review'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'review'
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
-              }`}
+                }`}
             >
               Pack Review
             </button>
             <button
               onClick={() => setActiveTab('consistency')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'consistency'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'consistency'
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
-              }`}
+                }`}
             >
               Consistency Graph
             </button>
             <button
               onClick={() => setActiveTab('responsibility')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'responsibility'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'responsibility'
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
-              }`}
+                }`}
             >
               AI Responsibility
             </button>
             <button
               onClick={() => setActiveTab('impact')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'impact'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'impact'
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
-              }`}
+                }`}
             >
               Change Impact
             </button>
             <button
               onClick={() => setActiveTab('publish')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'publish'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'publish'
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
-              }`}
+                }`}
             >
               Publish & Export
             </button>
@@ -490,11 +530,10 @@ export const UnitPackPage: React.FC = () => {
                       <button
                         key={item.slot.id}
                         onClick={() => setSelectedSlotId(item.slot.id)}
-                        className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between text-xs ${
-                          isSelected
+                        className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between text-xs ${isSelected
                             ? 'bg-indigo-50 border border-indigo-200 text-indigo-950 font-medium shadow-sm'
                             : 'hover:bg-slate-50 text-slate-700 border border-transparent'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2.5 truncate">
                           <span className="w-5 h-5 rounded bg-white border border-slate-200 text-slate-600 font-semibold text-[10px] flex items-center justify-center shrink-0">
@@ -506,7 +545,8 @@ export const UnitPackPage: React.FC = () => {
                               {item.asset?.locked && <Lock className="w-3 h-3 text-emerald-600" />}
                             </div>
                             <div className="text-[10px] text-slate-400 truncate">
-                              Objective #{item.slot.objective_id}
+                              Objective #{item.slot.objective_position || (pack?.by_objective?.findIndex(o => o.objective.id === item.slot.objective_id) ?? -1) + 1 || 1}
+                              {item.slot.objective_text ? `: ${item.slot.objective_text.slice(0, 35)}...` : ''}
                             </div>
                           </div>
                         </div>
@@ -537,7 +577,7 @@ export const UnitPackPage: React.FC = () => {
                         )}
                       </div>
                     }
-                    subtitle={`Slot ID #${activeItem.slot.id} • Objective #${activeItem.slot.objective_id}`}
+                    subtitle={`Slot ID #${activeItem.slot.id} • Objective #${activeItem.slot.objective_position || (pack?.by_objective?.findIndex(o => o.objective.id === activeItem.slot.objective_id) ?? -1) + 1 || 1}${activeItem.slot.objective_text ? ` (${activeItem.slot.objective_text.slice(0, 45)}...)` : ''}`}
                     action={
                       <div className="flex items-center gap-2">
                         {activeItem.slot.bloom_tag && (
@@ -746,11 +786,10 @@ export const UnitPackPage: React.FC = () => {
                                 return (
                                   <div
                                     key={oIdx}
-                                    className={`p-2.5 rounded-lg border flex items-center justify-between ${
-                                      isCorrect
+                                    className={`p-2.5 rounded-lg border flex items-center justify-between ${isCorrect
                                         ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-semibold'
                                         : 'bg-white border-slate-200 text-slate-700'
-                                    }`}
+                                      }`}
                                   >
                                     <span>{String.fromCharCode(65 + oIdx)}. {opt}</span>
                                     {isCorrect && (

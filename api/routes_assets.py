@@ -258,6 +258,77 @@ def regenerate_asset(
         )
 
 
+@router.get("/{asset_id}")
+def get_asset_detail(
+    asset_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """
+    Retrieve full asset detail including current version content, slot metadata,
+    unit/source provenance, verified claims, and quality flags.
+    """
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset {asset_id} not found.",
+        )
+    slot = asset.slot
+    unit = slot.unit if slot else None
+    obj = slot.objective if slot else None
+    cur_v = asset.current_version
+
+    claims_list = []
+    if cur_v:
+        for cl in cur_v.claims:
+            claims_list.append({
+                "id": cl.id,
+                "text": cl.text,
+                "source_quote": cl.source_quote,
+                "chunk_id": cl.chunk_id,
+                "char_start": cl.char_start,
+                "char_end": cl.char_end,
+                "verified": cl.verified,
+                "match_score": cl.match_score,
+            })
+
+    flags_list = [
+        {
+            "id": f.id,
+            "code": f.code,
+            "severity": f.severity,
+            "message": f.message,
+            "resolved": f.resolved,
+            "asset_version_id": f.asset_version_id,
+        }
+        for f in asset.quality_flags
+    ]
+
+    return {
+        "asset_id": asset.id,
+        "slot_id": slot.id if slot else None,
+        "unit_id": unit.id if unit else None,
+        "source_id": unit.source_id if unit else None,
+        "source_version_id": unit.pinned_source_version_id if unit else None,
+        "objective_id": obj.id if obj else None,
+        "objective_text": obj.text if obj else "",
+        "objective_bloom": obj.bloom_target if obj else "understand",
+        "slot_type": slot.type if slot else "",
+        "position": slot.position if slot else 1,
+        "difficulty": slot.difficulty if slot else "medium",
+        "bloom_tag": slot.bloom_tag if slot else "understand",
+        "status": asset.status,
+        "locked": asset.locked,
+        "current_version_no": cur_v.version_no if cur_v else None,
+        "model": cur_v.model if cur_v else None,
+        "content": cur_v.content if cur_v else None,
+        "verification": cur_v.verification if cur_v else {},
+        "claims": claims_list,
+        "quality_flags": flags_list,
+    }
+
+
 @router.get("/{asset_id}/versions")
 def get_asset_versions(
     asset_id: int,

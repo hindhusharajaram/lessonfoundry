@@ -89,6 +89,65 @@ class RevisionContent(BaseModel):
 # Generation Helpers & Pipeline
 # ==========================================
 
+def count_explanation_words(content_dict: Dict[str, Any]) -> int:
+    """Count actual instructional words in an explanation asset (summary + sentences + glossary)."""
+    tokens: List[str] = []
+    summary = content_dict.get("summary", "")
+    if summary:
+        tokens.extend(summary.split())
+    for s in content_dict.get("sentences", []):
+        t = s.get("text", "")
+        if t:
+            tokens.extend(t.split())
+    for g in content_dict.get("glossary", []):
+        term = g.get("term", "")
+        defn = g.get("definition", "")
+        if term:
+            tokens.extend(term.split())
+        if defn:
+            tokens.extend(defn.split())
+    return len(tokens)
+
+
+def is_placeholder_or_invalid_question(content_dict: Dict[str, Any], objective_text: str) -> Tuple[bool, str]:
+    """Check if generated assessment item contains forbidden placeholders or objective-as-question copies."""
+    if not isinstance(content_dict, dict):
+        return False, ""
+
+    question = content_dict.get("question", "").strip()
+    if question:
+        clean_obj = objective_text.strip().lower()
+        clean_q = question.lower()
+        
+        # Check 1: Objective copied as question
+        if clean_obj in clean_q and ("according to the source text regarding" in clean_q or len(clean_q) < len(clean_obj) + 60):
+            return True, "Question wraps the objective statement instead of asking a direct subject question."
+
+        # Check 2: Forbidden generic placeholder phrases in question or options
+        forbidden_phrases = [
+            "contradictory claim unsupported",
+            "unsupported by the source text",
+            "alternative mechanism not described",
+            "outdated hypothesis regarding",
+            "not described in the provided source",
+            "placeholder option",
+        ]
+        for fp in forbidden_phrases:
+            if fp in clean_q:
+                return True, f"Question contains placeholder phrase: '{fp}'"
+
+        options = content_dict.get("options", [])
+        for opt in options:
+            if isinstance(opt, str):
+                for fp in forbidden_phrases:
+                    if fp in opt.lower():
+                        return True, f"Option contains placeholder phrase: '{fp}'"
+                if opt.strip().lower() == clean_obj:
+                    return True, "Option copies the learning objective statement."
+
+    return False, ""
+
+
 def _extract_claims_from_content(content_dict: Dict[str, Any], slot_type: str) -> List[Tuple[str, str]]:
     """Extract all (text_claim, source_quote) pairs from generated content dict."""
     claims: List[Tuple[str, str]] = []
@@ -132,6 +191,7 @@ def generate_slot(
     """
     Generate or regenerate content for a single Slot.
     - Locks untrusted source text into boundary delimiters.
+    - Enforces teacher constraints (e.g. max_words for explanations).
     - Generates strictly structured JSON matching spec schemas.
     - Validates quotes with non-LLM verifier.
     - Creates Claim rows and stores complete AssetVersion provenance.
@@ -149,22 +209,41 @@ def generate_slot(
     relevant_chunks = score_chunks_for_query(f"{objective.text} {slot.type}", source_version.chunks, top_k=5)
     source_block = build_source_block(relevant_chunks)
 
-    # 2. Retrieve already-generated related content for context/consistency
-    related_context = []
-    sibling_slots = (
+    # 2. Retrieve already-generated questions across the unit to prevent duplication
+    existing_questions = []
+    other_unit_slots = (
         db.query(Slot)
-        .filter(Slot.unit_id == unit.id, Slot.objective_id == objective.id, Slot.id != slot.id)
+        .filter(Slot.unit_id == unit.id, Slot.id != slot.id)
+        .order_by(Slot.position)
         .all()
     )
-    for sib in sibling_slots:
-        if sib.asset and sib.asset.current_version:
-            related_context.append(
-                f"- Related {sib.type}: {json.dumps(sib.asset.current_version.content)}"
-            )
+    for o_slot in other_unit_slots:
+        if o_slot.asset and o_slot.asset.current_version and o_slot.asset.current_version.content:
+            c = o_slot.asset.current_version.content
+            if isinstance(c, dict) and c.get("question"):
+                existing_questions.append(
+                    f"- Slot #{o_slot.position} ({o_slot.type} | Obj: \"{o_slot.objective.text[:45]}...\"): \"{c['question']}\""
+                )
 
-    context_str = "\n".join(related_context) if related_context else "None yet."
+    anti_dup_guidance = ""
+    if existing_questions:
+        anti_dup_guidance = (
+            "CRITICAL ANTI-DUPLICATION RULE:\n"
+            "The following questions ALREADY exist in this unit. You MUST NOT duplicate, paraphrase, or test the exact same scenario as any of them:\n"
+            + "\n".join(existing_questions)
+            + "\nEnsure your question tests a completely DIFFERENT concept, mechanism, calculation, or pedagogical angle."
+        )
 
     bloom_guidance = get_bloom_prompt_instruction(slot.bloom_tag, slot.difficulty)
+
+    anti_placeholder_rules = (
+        "MANDATORY QUESTION & OPTION AUTHENTICITY RULES:\n"
+        "1. Direct Subject Question: Formulate a natural, direct question testing specific concepts from the source material.\n"
+        "2. NEVER copy or wrap the objective text (e.g. NEVER write 'According to the source text regarding [objective]...').\n"
+        "3. NEVER use generic placeholder options (e.g. NEVER write 'Contradictory claim unsupported...', 'Alternative mechanism not described...', 'Outdated hypothesis...').\n"
+        "4. All 4 options must be realistic, substantive domain statements.\n"
+        "5. Distribute the correct answer across indices 0, 1, 2, or 3."
+    )
 
     # 3. Build Prompt & Select Schema
     prompt_version = "1.0"
@@ -174,7 +253,7 @@ def generate_slot(
         f"Target Objective: \"{objective.text}\"\n"
         f"Slot Type: {slot.type} | Difficulty: {slot.difficulty} | Bloom Target: {slot.bloom_tag}\n"
         f"{bloom_guidance}\n\n"
-        f"Prior Objective Context:\n{context_str}\n\n"
+        f"{anti_placeholder_rules}\n\n"
         f"Mandatory Evidence Rules:\n"
         f"1. Every single sentence, step, key point, or question MUST carry a verbatim exact quote from the source text above.\n"
         f"2. NO FLASHCARDS anywhere in output.\n"
@@ -189,12 +268,29 @@ def generate_slot(
             f"You MUST directly address this teacher feedback in your generation while maintaining strict evidence grounding."
         )
 
+    # Check for teacher-defined max_words constraint
+    max_words_constraint: Optional[int] = None
+    if unit.constraints and isinstance(unit.constraints, dict):
+        raw_mw = unit.constraints.get("max_words") or unit.constraints.get("max_explanation_words")
+        if raw_mw is not None:
+            try:
+                max_words_constraint = int(raw_mw)
+            except (ValueError, TypeError):
+                pass
+
     schema_type: Type[BaseModel]
     if slot.type == "explanation":
         schema_type = ExplanationContent
+        length_clause = ""
+        if max_words_constraint and max_words_constraint > 0:
+            length_clause = (
+                f"\nSTRICT WORD COUNT LIMIT: The entire explanation (summary + sentences + glossary) "
+                f"MUST NOT exceed {max_words_constraint} total words. Keep explanations concise, clear, and under {max_words_constraint} words.\n"
+            )
         prompt = (
             f"{base_instructions}\n\n"
-            f"Generate an Evidence-Locked Explanation for '{objective.text}'.\n"
+            f"{length_clause}"
+            f"Generate an Evidence-Locked Explanation strictly teaching '{objective.text}'.\n"
             f"Include a title, summary, 3-5 instructional sentences each with a verbatim quote, "
             f"and a glossary of key terms with definitions and verbatim quotes."
         )
@@ -205,14 +301,51 @@ def generate_slot(
             f"Generate a Worked Example demonstrating '{objective.text}'.\n"
             f"Include a problem scenario, 2-4 step-by-step reasoning steps each with a verbatim quote, and a final answer."
         )
-    elif slot.type in ["quiz_item", "practice_foundation", "practice_advanced"]:
+    elif slot.type == "quiz_item":
         schema_type = QuizItemContent
         prompt = (
             f"{base_instructions}\n\n"
-            f"Generate a Multiple-Choice Question for '{objective.text}'.\n"
-            f"Options must have exactly 4 plausible choices with 1 correct_index (0-3).\n"
-            f"The question text must NOT leak or give away the answer.\n"
-            f"Include a rationale, the verbatim quote supporting the correct answer, bloom tag ('{slot.bloom_tag}'), and difficulty ('{slot.difficulty}')."
+            f"{anti_dup_guidance}\n\n"
+            f"FORMATIVE ASSESSMENT QUIZ ITEM REQUIREMENTS:\n"
+            f"Generate a distinctive Multiple-Choice Quiz Item evaluating mastery of: '{objective.text}'.\n"
+            f"- Question: Must directly assess understanding of '{objective.text}'. Must NOT leak the answer.\n"
+            f"- Options: Exactly 4 distinct, plausible choices (1 correct, 3 distractors).\n"
+            f"- Correct Answer Index: 0-3.\n"
+            f"- Rationale: Pedagogical explanation of why the correct option is right and distractors are wrong.\n"
+            f"- Evidence Quote: Verbatim quote from the source supporting the correct answer.\n"
+            f"- Bloom Tag: '{slot.bloom_tag}' | Difficulty: '{slot.difficulty}'."
+        )
+    elif slot.type == "practice_foundation":
+        schema_type = QuizItemContent
+        prompt = (
+            f"{base_instructions}\n\n"
+            f"{anti_dup_guidance}\n\n"
+            f"FOUNDATION PRACTICE ITEM REQUIREMENTS (Introductory Mastery):\n"
+            f"Generate an introductory FOUNDATION Practice Question evaluating: '{objective.text}'.\n"
+            f"- Pedagogical Focus: Test fundamental understanding, core terminology, direct conceptual definitions, or simple single-step problem solving.\n"
+            f"- Level: Accessible and confidence-building for students learning '{objective.text}'.\n"
+            f"- Distinctness: Must NOT duplicate any quiz items or advanced practice questions.\n"
+            f"- Options: Exactly 4 distinct choices (1 correct, 3 plausible distractors).\n"
+            f"- Correct Answer Index: 0-3.\n"
+            f"- Rationale: Clear, encouraging step-by-step foundational explanation.\n"
+            f"- Evidence Quote: Verbatim quote from the source supporting the correct answer.\n"
+            f"- Bloom Tag: '{slot.bloom_tag or 'Understand'}' | Difficulty: 'easy'."
+        )
+    elif slot.type == "practice_advanced":
+        schema_type = QuizItemContent
+        prompt = (
+            f"{base_instructions}\n\n"
+            f"{anti_dup_guidance}\n\n"
+            f"ADVANCED PRACTICE ITEM REQUIREMENTS (Analytical Depth & Rigor):\n"
+            f"Generate an ADVANCED Practice Question evaluating: '{objective.text}'.\n"
+            f"- Pedagogical Focus: Test higher-order analytical reasoning, multi-step calculation, comparative trade-offs between techniques, or evaluating complex edge-case scenarios.\n"
+            f"- Level: Challenging and intellectually rigorous, requiring deep reasoning beyond simple recall.\n"
+            f"- Distinctness: Must NOT ask simple definitions or duplicate foundation practice.\n"
+            f"- Options: Exactly 4 distinct, nuanced choices (1 correct, 3 rigorous distractors).\n"
+            f"- Correct Answer Index: 0-3.\n"
+            f"- Rationale: In-depth analytical rationale dissecting misconceptions and complex reasoning.\n"
+            f"- Evidence Quote: Verbatim quote from the source supporting the correct answer.\n"
+            f"- Bloom Tag: '{slot.bloom_tag or 'Analyze'}' | Difficulty: 'advanced'."
         )
     elif slot.type == "revision":
         schema_type = RevisionContent
@@ -232,6 +365,97 @@ def generate_slot(
         prompt_version=prompt_version,
     )
     content_dict = parsed_content.model_dump()
+
+    # 4a. Explanation Word Limit Validation & Revision Loop
+    if slot.type == "explanation" and max_words_constraint and max_words_constraint > 0:
+        actual_words = count_explanation_words(content_dict)
+        for retry_idx in range(2):
+            if actual_words <= max_words_constraint:
+                break
+            retry_prompt = (
+                f"{prompt}\n\n"
+                f"REVISION REQUIRED (WORD LIMIT EXCEEDED):\n"
+                f"Your previous explanation contained {actual_words} words, which exceeds the teacher's limit of {max_words_constraint} words.\n"
+                f"Rewrite and compress the explanation to be strictly under {max_words_constraint} total words while retaining accurate sentences and source quotes."
+            )
+            try:
+                retry_parsed, retry_meta = generate_json(
+                    prompt=retry_prompt,
+                    schema=schema_type,
+                    temperature=0.2,
+                    prompt_version=prompt_version,
+                )
+                retry_dict = retry_parsed.model_dump()
+                new_words = count_explanation_words(retry_dict)
+                if new_words <= max_words_constraint or new_words < actual_words:
+                    content_dict = retry_dict
+                    meta = retry_meta
+                    actual_words = new_words
+            except Exception:
+                pass
+
+    # 4b. In-flight duplicate detection and re-generation
+    if slot.type in ["quiz_item", "practice_foundation", "practice_advanced"]:
+        from rapidfuzz import fuzz
+        gen_question = content_dict.get("question", "").strip()
+        is_dup = False
+        dup_match = ""
+        for o_slot in other_unit_slots:
+            if o_slot.asset and o_slot.asset.current_version and o_slot.asset.current_version.content:
+                prev_q = o_slot.asset.current_version.content.get("question", "").strip()
+                if prev_q:
+                    jaccard = len(set(gen_question.lower().split()).intersection(set(prev_q.lower().split()))) / max(1, len(set(gen_question.lower().split()).union(set(prev_q.lower().split()))))
+                    ratio = fuzz.ratio(gen_question.lower(), prev_q.lower()) / 100.0
+                    tok_set = fuzz.token_set_ratio(gen_question.lower(), prev_q.lower()) / 100.0
+                    if jaccard >= 0.60 or ratio >= 0.75 or tok_set >= 0.80:
+                        is_dup = True
+                        dup_match = prev_q
+                        break
+
+        if is_dup:
+            retry_prompt = (
+                f"{prompt}\n\n"
+                f"RETRY REQUIRED: Your previous attempt generated a question too similar to: \"{dup_match}\".\n"
+                f"Generate a COMPLETELY DIFFERENT question testing a distinct aspect of '{objective.text}'."
+            )
+            try:
+                retry_content, retry_meta = generate_json(
+                    prompt=retry_prompt,
+                    schema=schema_type,
+                    temperature=0.6,
+                    prompt_version=prompt_version,
+                )
+                content_dict = retry_content.model_dump()
+            except Exception:
+                pass
+
+    # 4c. Anti-Placeholder and Objective-as-Question Validation & Re-generation
+    if slot.type in ["quiz_item", "practice_foundation", "practice_advanced"]:
+        is_invalid, invalid_reason = is_placeholder_or_invalid_question(content_dict, objective.text)
+        if is_invalid:
+            retry_prompt = (
+                f"{prompt}\n\n"
+                f"RETRY REQUIRED (INVALID PLACEHOLDER CONTENT DETECTED):\n"
+                f"Reason: {invalid_reason}\n"
+                f"STRICT RULES:\n"
+                f"1. Formulate a DIRECT subject question testing specific concepts from the source (e.g. 'What causes the convoy effect?').\n"
+                f"2. Do NOT copy the objective statement or use meta-questions.\n"
+                f"3. Generate 4 realistic, subject-matter options without generic placeholder phrases."
+            )
+            try:
+                retry_content, retry_meta = generate_json(
+                    prompt=retry_prompt,
+                    schema=schema_type,
+                    temperature=0.5,
+                    prompt_version=prompt_version,
+                )
+                candidate_dict = retry_content.model_dump()
+                still_invalid, _ = is_placeholder_or_invalid_question(candidate_dict, objective.text)
+                if not still_invalid:
+                    content_dict = candidate_dict
+                    meta = retry_meta
+            except Exception:
+                pass
 
     # Update slot bloom_tag if model returned a refined one
     if "bloom" in content_dict:
@@ -321,7 +545,19 @@ def generate_slot(
             message=f"Asset has {total_claims - verified_claims_count} unverified quote(s).",
         )
         db.add(flag)
-        asset.status = "draft"
+
+    if slot.type == "explanation" and max_words_constraint and max_words_constraint > 0:
+        exp_words = count_explanation_words(content_dict)
+        if exp_words > max_words_constraint:
+            flag = QualityFlag(
+                unit_id=unit.id,
+                asset_version_id=asset_version.id,
+                code="word_limit_exceeded",
+                severity="warning",
+                message=f"Explanation contains {exp_words} words, exceeding configured maximum of {max_words_constraint} words.",
+            )
+            db.add(flag)
+            asset.status = "needs_revision"
 
     db.commit()
     db.refresh(asset_version)
@@ -350,6 +586,23 @@ def generate_unit_pack(unit_id: int, db: Session) -> Dict[str, Any]:
     slots = db.query(Slot).filter(Slot.unit_id == unit_id).order_by(Slot.position).all()
     if not slots:
         raise ValueError("Unit has no slots. Run POST /api/units/{id}/plan first.")
+
+    # Pre-generation validation: ensure unit objectives are valid and slots reference only current unit objectives
+    unit_objectives = unit.objectives
+    if not unit_objectives:
+        raise ValueError(f"Unit {unit_id} has no learning objectives configured.")
+
+    valid_objective_ids = {obj.id for obj in unit_objectives}
+
+    for s in slots:
+        if s.unit_id != unit.id:
+            raise ValueError(f"Slot {s.id} belongs to unit {s.unit_id}, but generation requested for unit {unit.id}.")
+        if s.objective_id not in valid_objective_ids:
+            raise ValueError(
+                f"Slot {s.id} references objective ID {s.objective_id} which does not belong to unit {unit.id} (valid IDs: {valid_objective_ids})."
+            )
+        if not s.objective or s.objective.unit_id != unit.id:
+            raise ValueError(f"Slot {s.id} is linked to a non-existent or foreign objective record.")
 
     # Order slots pedagogically
     type_priority = {

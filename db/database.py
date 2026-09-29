@@ -40,5 +40,19 @@ def get_db():
 
 def init_db():
     """Initializes all database tables from models."""
+    from sqlalchemy import text
     from db.models import Base as ModelsBase
     ModelsBase.metadata.create_all(bind=engine)
+
+    # Safe migration for existing SQLite database files
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE students ADD COLUMN student_user_id INTEGER REFERENCES users(id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN join_code VARCHAR(16) UNIQUE"))
+            conn.commit()
+        except Exception:
+            pass

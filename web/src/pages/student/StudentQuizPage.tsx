@@ -61,19 +61,20 @@ export const StudentQuizPage: React.FC = () => {
   if (loading) return <LoadingState message="Loading formative assessment questions..." />;
   if (!unitData) return <div>Assessment not available.</div>;
 
-  const quizAssets = unitData.slots?.filter(
+  const formativeQuizItems = unitData.slots?.filter((a: any) => a.type === 'quiz_item') || [];
+  const quizAssets = formativeQuizItems.length > 0 ? formativeQuizItems : (unitData.slots?.filter(
     (a: any) =>
       a.type === 'quiz_item' ||
       a.type === 'practice_foundation' ||
       a.type === 'practice_advanced'
-  ) || [];
+  ) || []);
 
   const totalQuestions = quizAssets.length;
   const currentAsset = quizAssets[currentQuestionIndex];
   const answeredCount = Object.keys(selectedAnswers).length;
 
   const handleSelectOption = (assetId: number, optionIdx: number) => {
-    if (submitted) return;
+    if (submitted || isSubmitting) return;
     setSelectedAnswers((prev) => ({
       ...prev,
       [assetId]: optionIdx,
@@ -97,6 +98,7 @@ export const StudentQuizPage: React.FC = () => {
   };
 
   const handleSubmitQuiz = async () => {
+    if (isSubmitting || submitted) return;
     try {
       setIsSubmitting(true);
       const answersPayload = Object.entries(selectedAnswers).map(([assetId, chosenIndex]) => ({

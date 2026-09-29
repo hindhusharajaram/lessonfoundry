@@ -266,9 +266,36 @@ The complete teacher feedback revision and immutable regeneration loop was teste
    - `GET /api/assets/{id}/versions` returns the full version history tree with `version_no`, `model`, `parent_version_id`, and `created_at` timestamps.
 
 ### 2. Live Verification Results
-- **Asset 1 (Regenerated)**: Transitioned from `v1 (approved, locked=True)` $\rightarrow$ `v2 (needs_revision, parent_id=1)`.
-- **Asset 2 (Other Unit Asset)**: Remained untouched at `v1 (approved, locked=True)` with zero mutation.
-- **Lineage Verification**: `GET /api/assets/1/versions` confirmed both `v1` and `v2` preserved in provenance chain.
+---
+
+## Constraint-Aware Learning Asset Generation Studio Updates
+
+### 1. Key Fixes Implemented
+
+1. **Teacher-Defined Explanation Word Limit**:
+   - `count_explanation_words` in [`engine/generator.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/engine/generator.py) accurately counts words across summary, instructional sentences, and glossary definitions.
+   - Enforces the teacher-defined `max_words` constraint via prompt directives and a 2-stage automated conciseness regeneration loop.
+   - Attaches `QualityFlag(code="word_limit_exceeded")` and marks `status="needs_revision"` if the word count still exceeds the limit after retries.
+
+2. **Slot Scheduler & Asset Distribution**:
+   - Replaced hardcoded slot formulas in [`engine/planner.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/engine/planner.py) with dynamic, configuration-driven logic.
+   - Formative Quiz items match the exact configured count (e.g., 10 quiz items $\rightarrow$ 10 slots).
+   - Generates 1 introductory Foundation Practice item (`difficulty="easy"`, Bloom="Remember"/"Understand") and 1 analytical Advanced Practice item (`difficulty="advanced"`, Bloom="Analyze"/"Evaluate") per supported objective.
+   - Dynamically calculates Easy, Medium, and Hard question distributions (`calculate_difficulty_distribution`) according to configured or default ratios.
+
+3. **Anti-Placeholder & Authentic Subject Generation**:
+   - Upgraded `_synthesize_grounded_fallback` in [`engine/model.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/engine/model.py) to extract genuine domain terms and formulate real subject-matter questions from source sentences.
+   - Eliminated all placeholder phrases (`"Contradictory claim unsupported..."`, `"Alternative mechanism not described..."`, `"Outdated hypothesis..."`, and `"According to the source text regarding [objective]..."`).
+   - Added `is_placeholder_or_invalid_question` validator in [`engine/generator.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/engine/generator.py) and `placeholder_content` check in [`engine/guardrails.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/engine/guardrails.py).
+
+4. **Student Answer Key Protection & Pack Health Diagnostics**:
+   - [`api/routes_student.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/api/routes_student.py) strips answer keys prior to submission and hides correct answers and rationales when `unit.answer_visibility == "teacher_only"`.
+   - [`engine/guardrails.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/engine/guardrails.py) returns `status="in_progress"` and honest `0.0` grounding/solver metrics when generation is still pending.
+
+### 2. Comprehensive Test Verification
+- **Pytest**: **61 passed, 1 skipped in 49.30s (100% pass rate)** across 62 tests in [`tests/test_constraint_fixes.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/tests/test_constraint_fixes.py), [`tests/test_advanced_features.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/tests/test_advanced_features.py), [`tests/test_planner.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/tests/test_planner.py), and [`tests/test_verifier.py`](file:///c:/Users/Jeni%20I/Documents/Edu%20Gen%20AI/Edu%20Gen%20AI/tests/test_verifier.py).
+- **Formal Evaluation Benchmark**: **9/9 cases passed in 8.87s** (`python -m eval.run`).
+- **Frontend Build**: `npm run build` (`tsc -b && vite build`) passed with **0 errors**.
 
 
 

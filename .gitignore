@@ -1,30 +1,87 @@
-# Python
-venv/
-.venv/
+# ==========================================
+# Byte-compiled / Python artifacts
+# ==========================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
+.eggs/
+
+# ==========================================
+# Distribution / Packaging
+# ==========================================
 dist/
 build/
+*.egg
+
+# ==========================================
+# Virtual Environments
+# ==========================================
+venv/
+.venv/
+env/
+ENV/
+
+# ==========================================
+# Testing & Coverage
+# ==========================================
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
 
-# Environment and secrets
+# ==========================================
+# Environment Variables, Secrets & Credentials
+# ==========================================
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.pfx
+secrets/
 
-# Databases and data
+# ==========================================
+# Database Files & Runtime Data (Confidential / State)
+# ==========================================
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/*.sqlite
 data/*.sqlite3
+data/*.sqlite-wal
+data/*.sqlite-shm
+data/*.jsonl
+data/model_calls.jsonl
 
-# Node / Frontend
+# ==========================================
+# Logs & Telemetry
+# ==========================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==========================================
+# Node / Frontend Build Artifacts
+# ==========================================
 node_modules/
-dist/
+web/node_modules/
+web/dist/
+web/.vite/
 .vite/
 
-# IDE / OS
-.vscode/
-.idea/
+# ==========================================
+# IDE & Operating System Artifacts
+# ==========================================
 .DS_Store
 Thumbs.db
+.idea/
+*.swp
+*.swo
+.vscode/*
+!.vscode/settings.json

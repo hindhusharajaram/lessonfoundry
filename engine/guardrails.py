@@ -217,6 +217,43 @@ def run_unit_guardrails(unit_id: int, db: Session) -> List[QualityFlag]:
                                 )
                             )
 
+                # --- 11. Placeholder & Objective-as-Question Detection ---
+                obj_text = slot.objective.text if slot.objective else ""
+                clean_obj = obj_text.strip().lower()
+                clean_q = q_text.lower()
+                if clean_obj and clean_obj in clean_q and ("according to the source text regarding" in clean_q or len(clean_q) < len(clean_obj) + 60):
+                    new_flags.append(
+                        QualityFlag(
+                            unit_id=unit.id,
+                            asset_version_id=av.id,
+                            code="placeholder_content",
+                            severity="error",
+                            message=f"Slot #{slot.position} question wraps the objective statement instead of asking an authentic domain question.",
+                        )
+                    )
+
+                forbidden_phrases = [
+                    "contradictory claim unsupported",
+                    "unsupported by the source text",
+                    "alternative mechanism not described",
+                    "outdated hypothesis regarding",
+                    "not described in the provided source",
+                ]
+                for opt in options:
+                    if isinstance(opt, str):
+                        for fp in forbidden_phrases:
+                            if fp in opt.lower():
+                                new_flags.append(
+                                    QualityFlag(
+                                        unit_id=unit.id,
+                                        asset_version_id=av.id,
+                                        code="placeholder_content",
+                                        severity="error",
+                                        message=f"Slot #{slot.position} contains generic placeholder option text: '{fp}'.",
+                                    )
+                                )
+                                break
+
         # Check revision slots
         elif slot.type == "revision":
             obj_glossary = explanation_glossary.get(slot.objective_id, {})
@@ -243,20 +280,22 @@ def run_unit_guardrails(unit_id: int, db: Session) -> List[QualityFlag]:
             slot_b, av_b, text_b, _, _ = question_items[j]
             tokens_b = _tokenize(text_b)
 
-            # Jaccard + RapidFuzz
+            # Jaccard + RapidFuzz (ratio and token_set_ratio for semantic paraphrasing)
             intersection = len(tokens_a.intersection(tokens_b))
             union = len(tokens_a.union(tokens_b))
             jaccard = (intersection / union) if union > 0 else 0.0
             ratio = fuzz.ratio(text_a.lower(), text_b.lower()) / 100.0
+            token_set = fuzz.token_set_ratio(text_a.lower(), text_b.lower()) / 100.0
 
-            if jaccard >= 0.80 or ratio >= 0.85:
+            max_sim = max(jaccard, ratio, token_set)
+            if jaccard >= 0.70 or ratio >= 0.80 or token_set >= 0.85:
                 new_flags.append(
                     QualityFlag(
                         unit_id=unit.id,
                         asset_version_id=av_a.id,
                         code="duplicate_question",
                         severity="warning",
-                        message=f"Slot #{slot_a.position} is near-duplicate of Slot #{slot_b.position} (similarity: {max(jaccard, ratio)*100:.0f}%).",
+                        message=f"Slot #{slot_a.position} is near-duplicate of Slot #{slot_b.position} (similarity: {max_sim*100:.0f}%).",
                     )
                 )
 
@@ -340,6 +379,10 @@ def calculate_pack_health(unit_id: int, db: Session) -> Dict[str, Any]:
         for tag, cnt in bloom_counts.items()
     ]
 
+    # Check generation completion status
+    has_unfilled_slots = any(not (s.asset and s.asset.current_version) for s in slots)
+    generation_in_progress = has_unfilled_slots or unit.status in ["draft", "planning"]
+
     # 3. Grounding Percentage
     total_claims = 0
     verified_claims = 0
@@ -349,7 +392,7 @@ def calculate_pack_health(unit_id: int, db: Session) -> Dict[str, Any]:
                 total_claims += 1
                 if c.verified:
                     verified_claims += 1
-    grounding_pct = round((verified_claims / total_claims) * 100, 1) if total_claims > 0 else 100.0
+    grounding_pct = round((verified_claims / total_claims) * 100, 1) if total_claims > 0 else (0.0 if generation_in_progress else 100.0)
 
     # 4. Solver Verification Rate
     total_quiz_slots = 0
@@ -362,7 +405,7 @@ def calculate_pack_health(unit_id: int, db: Session) -> Dict[str, Any]:
             if solver_info.get("matches_key"):
                 solver_matched_slots += 1
     solver_pct = (
-        round((solver_matched_slots / total_quiz_slots) * 100, 1) if total_quiz_slots > 0 else 100.0
+        round((solver_matched_slots / total_quiz_slots) * 100, 1) if total_quiz_slots > 0 else (0.0 if generation_in_progress else 100.0)
     )
 
     # 5. Open Flags by Severity
@@ -379,13 +422,18 @@ def calculate_pack_health(unit_id: int, db: Session) -> Dict[str, Any]:
     b_score = 100.0 if not any(f.code == "difficulty_mismatch" for f in open_flags) else 70.0
     v_score = max(0.0, 100.0 - (duplicate_count * 15.0) - (sum(1 for f in open_flags if f.code in ["answer_leakage", "malformed_key"]) * 20.0))
 
-    raw_score = (0.40 * g_score) + (0.25 * s_score) + (0.15 * o_score) + (0.10 * b_score) + (0.10 * v_score)
-    penalty = (errors_count * 10.0) + (warnings_count * 3.0)
-    health_score = max(0, min(100, int(round(raw_score - penalty))))
+    if generation_in_progress and total_claims == 0:
+        health_score = 0
+    else:
+        raw_score = (0.40 * g_score) + (0.25 * s_score) + (0.15 * o_score) + (0.10 * b_score) + (0.10 * v_score)
+        penalty = (errors_count * 10.0) + (warnings_count * 3.0)
+        health_score = max(0, min(100, int(round(raw_score - penalty))))
 
     return {
         "unit_id": unit.id,
         "title": unit.title,
+        "status": "in_progress" if generation_in_progress else unit.status,
+        "generation_complete": not has_unfilled_slots,
         "health_score": health_score,
         "grounding_percentage": grounding_pct,
         "solver_verification_rate": solver_pct,

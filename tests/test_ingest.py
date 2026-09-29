@@ -177,3 +177,240 @@ def test_pdf_upload_and_page_tracking():
     assert resp.status_code == 201
     data = resp.json()
     assert data["chunks_count"] >= 1
+
+
+def test_reject_both_file_and_text_submitted_together():
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Valid PDF content here.")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    files = {"file": ("document.pdf", pdf_bytes, "application/pdf")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Dual Input Test", "text": "Some non-empty pasted text content here."},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 400
+    assert "Cannot provide both" in resp.json()["detail"]
+
+
+def test_reject_no_input_or_empty_whitespace():
+    # 1. Completely empty payload
+    resp1 = client.post(
+        "/api/sources/upload",
+        data={"title": "Empty Test"},
+        headers={"X-Role": "teacher"},
+    )
+    assert resp1.status_code == 400
+    assert "Either a file upload or text content must be provided" in resp1.json()["detail"]
+
+    # 2. Whitespace-only text
+    resp2 = client.post(
+        "/api/sources/upload",
+        data={"title": "Whitespace Test", "text": "   \n\t   \n  "},
+        headers={"X-Role": "teacher"},
+    )
+    assert resp2.status_code == 400
+    assert "Either a file upload or text content must be provided" in resp2.json()["detail"]
+
+
+def test_reject_empty_zero_byte_file():
+    files = {"file": ("empty.txt", b"", "text/plain")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Empty File Test"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 400
+    assert "empty (0 bytes)" in resp.json()["detail"]
+
+
+def test_reject_unsupported_file_extension():
+    files = {"file": ("script.exe", b"binary content", "application/octet-stream")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Unsupported File Test"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 400
+    assert "Unsupported file format" in resp.json()["detail"]
+
+
+def test_scanned_image_pdf_ocr_extraction():
+    """Test that a PDF composed solely of a raster image with text is OCR'd successfully."""
+    import fitz
+    from PIL import Image, ImageDraw
+
+    # Create an image with text
+    img = Image.new("RGB", (600, 200), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.text((30, 80), "Cellular respiration breaks down glucose to produce ATP.", fill=(0, 0, 0))
+
+    import io
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format="PNG")
+    png_bytes = img_byte_arr.getvalue()
+
+    # Create PDF with the image embedded (no vector text)
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=200)
+    page.insert_image(page.rect, stream=png_bytes)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    files = {"file": ("scanned_page.pdf", pdf_bytes, "application/pdf")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Scanned Biology Notes"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["chunks_count"] >= 1
+
+    session = SessionLocal()
+    source_ver = session.query(SourceVersion).filter_by(id=data["source_version_id"]).first()
+    assert source_ver is not None
+    assert "respiration" in source_ver.text.lower()
+    session.close()
+
+
+def test_mixed_pdf_text_and_scanned_pages():
+    """Test a PDF where page 1 has digital text and page 2 is an image-only scan."""
+    import fitz
+    from PIL import Image, ImageDraw
+    import io
+
+    # Page 1: Native vector text
+    doc = fitz.open()
+    page1 = doc.new_page(width=600, height=300)
+    page1.insert_text((50, 50), "Page 1: Photosynthesis uses chlorophyll pigments to capture light.")
+
+    # Page 2: Image text
+    img = Image.new("RGB", (600, 300), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.text((50, 50), "Page 2: The Calvin cycle fixes carbon dioxide in the stroma.", fill=(0, 0, 0))
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="PNG")
+
+    page2 = doc.new_page(width=600, height=300)
+    page2.insert_image(page2.rect, stream=img_bytes.getvalue())
+
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    files = {"file": ("mixed_doc.pdf", pdf_bytes, "application/pdf")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Mixed Text and Scan PDF"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+
+    session = SessionLocal()
+    source_ver = session.query(SourceVersion).filter_by(id=data["source_version_id"]).first()
+    assert "Photosynthesis" in source_ver.text
+    assert "Calvin cycle" in source_ver.text or "carbon" in source_ver.text.lower()
+    # Check that chunks exist
+    assert len(source_ver.chunks) >= 1
+    session.close()
+
+
+def test_blank_pdf_rejected_with_clean_error():
+    """Test that a completely blank PDF is rejected with a clear 400 error."""
+    import fitz
+    doc = fitz.open()
+    doc.new_page()  # Blank page
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    files = {"file": ("blank.pdf", pdf_bytes, "application/pdf")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Blank PDF"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 400
+    assert "no extractable text or readable images" in resp.json()["detail"]
+
+
+def test_corrupted_pdf_rejected_with_clean_error():
+    """Test that corrupted non-PDF bytes return a clean 400 error."""
+    files = {"file": ("corrupt.pdf", b"%PDF-1.5 \x00\xff invalid corrupted data", "application/pdf")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Corrupt PDF"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 400
+    assert "Could not parse PDF file" in resp.json()["detail"]
+
+
+def test_password_protected_pdf_rejected():
+    """Test that an encrypted/password-protected PDF is cleanly rejected with password notice."""
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Secret Protected Educational Content")
+    # Save with user password encryption
+    pdf_bytes = doc.tobytes(encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="secretpass")
+    doc.close()
+
+    files = {"file": ("encrypted.pdf", pdf_bytes, "application/pdf")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Encrypted PDF"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 400
+    assert "password-protected or encrypted" in resp.json()["detail"]
+
+
+def test_ocr_evidence_chunk_offsets_exact_slicing():
+    """Test that OCR-extracted text chunks perfectly slice the stored source text for evidence highlighting."""
+    import fitz
+    from PIL import Image, ImageDraw
+    import io
+
+    img = Image.new("RGB", (700, 300), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.text((40, 50), "Enzymes are biological catalysts that lower activation energy.", fill=(0, 0, 0))
+    draw.text((40, 100), "Substrates bind to the active site forming an enzyme substrate complex.", fill=(0, 0, 0))
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="PNG")
+
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=300)
+    page.insert_image(page.rect, stream=img_bytes.getvalue())
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    files = {"file": ("enzymes_scan.pdf", pdf_bytes, "application/pdf")}
+    resp = client.post(
+        "/api/sources/upload",
+        data={"title": "Enzymes Scan"},
+        files=files,
+        headers={"X-Role": "teacher"},
+    )
+    assert resp.status_code == 201
+
+    session = SessionLocal()
+    source_ver = session.query(SourceVersion).filter_by(id=resp.json()["source_version_id"]).first()
+    assert len(source_ver.chunks) > 0
+    for chunk in source_ver.chunks:
+        # Ground-truth check: slicing source_ver.text by char_start:char_end MUST equal chunk.text exactly
+        assert source_ver.text[chunk.char_start:chunk.char_end] == chunk.text
+    session.close()
+

@@ -9,8 +9,8 @@ interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 export const Card: React.FC<CardProps> = ({ children, className = '', hoverable = false, ...props }) => {
   return (
     <div
-      className={`bg-white rounded-[14px] border border-[#E5E9F2] shadow-card transition-all duration-200 ${
-        hoverable ? 'hover:shadow-elevated hover:border-brand-200' : ''
+      className={`bg-[var(--bg-card)] rounded-[14px] border border-[var(--border-card)] shadow-card transition-all duration-200 ${
+        hoverable ? 'hover:shadow-elevated hover:border-[#4F46E5]/40' : ''
       } ${className}`}
       {...props}
     >
@@ -26,10 +26,10 @@ export const CardHeader: React.FC<{
   className?: string;
 }> = ({ title, subtitle, action, className = '' }) => {
   return (
-    <div className={`p-5 pb-4 border-b border-[#F0F3F8] flex items-center justify-between ${className}`}>
+    <div className={`p-5 pb-4 border-b border-[var(--border-subtle)] flex items-center justify-between ${className}`}>
       <div>
-        <h3 className="font-semibold text-slate-900 text-base flex items-center gap-2">{title}</h3>
-        {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+        <h3 className="font-semibold text-[var(--text-primary)] text-base flex items-center gap-2">{title}</h3>
+        {subtitle && <p className="text-xs text-[var(--text-muted)] mt-0.5">{subtitle}</p>}
       </div>
       {action && <div>{action}</div>}
     </div>
@@ -47,5 +47,5 @@ export const CardFooter: React.FC<{ children: React.ReactNode; className?: strin
   children,
   className = '',
 }) => {
-  return <div className={`p-4 bg-[#FAFBFD] border-t border-[#F0F3F8] rounded-b-[14px] ${className}`}>{children}</div>;
+  return <div className={`p-4 bg-[var(--bg-card-footer)] border-t border-[var(--border-subtle)] rounded-b-[14px] ${className}`}>{children}</div>;
 };

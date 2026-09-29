@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.database import Base
@@ -305,14 +306,63 @@ class DecisionLog(Base):
     asset: Mapped[Optional["Asset"]] = relationship("Asset", back_populates="decision_logs")
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="teacher", nullable=False)  # "teacher" or "student"
+    hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    join_code: Mapped[Optional[str]] = mapped_column(String(16), unique=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    enrollments_as_teacher: Mapped[List["Enrollment"]] = relationship(
+        "Enrollment", foreign_keys="Enrollment.teacher_user_id", back_populates="teacher", cascade="all, delete-orphan"
+    )
+    enrollments_as_student: Mapped[List["Enrollment"]] = relationship(
+        "Enrollment", foreign_keys="Enrollment.student_user_id", back_populates="student_user", cascade="all, delete-orphan"
+    )
+    student_profiles: Mapped[List["Student"]] = relationship(
+        "Student", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class Enrollment(Base):
+    __tablename__ = "enrollments"
+    __table_args__ = (
+        UniqueConstraint("teacher_user_id", "student_user_id", name="uq_teacher_student_enrollment"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    teacher_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    student_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    teacher: Mapped["User"] = relationship(
+        "User", foreign_keys=[teacher_user_id], back_populates="enrollments_as_teacher"
+    )
+    student_user: Mapped["User"] = relationship(
+        "User", foreign_keys=[student_user_id], back_populates="enrollments_as_student"
+    )
+
+
 class Student(Base):
     __tablename__ = "students"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     class_label: Mapped[str] = mapped_column(String(100), default="Class A")
     synthetic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="student_profiles")
     attempts: Mapped[List["QuizAttempt"]] = relationship(
         "QuizAttempt", back_populates="student", cascade="all, delete-orphan"
     )

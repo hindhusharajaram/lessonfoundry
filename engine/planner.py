@@ -5,9 +5,44 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from db.models import Asset, Objective, QualityFlag, Slot, SourceChunk, Unit
-from engine.bloom import get_bloom_target_for_difficulty
+from engine.bloom import get_bloom_target_for_difficulty, get_bloom_target_for_question
 from engine.model import build_source_block, generate_json
 from engine.verifier import verify_quote
+
+
+def calculate_difficulty_distribution(
+    total_quiz: int,
+    unit_diff: str,
+    custom_dist: Optional[Dict[str, int]] = None,
+) -> List[str]:
+    """Return an ordered list of difficulty levels ('easy', 'medium', 'advanced') for total_quiz items."""
+    if custom_dist and isinstance(custom_dist, dict):
+        easy_cnt = int(custom_dist.get("easy", 0))
+        med_cnt = int(custom_dist.get("medium", 0))
+        hard_cnt = int(custom_dist.get("hard", custom_dist.get("advanced", 0)))
+        total_custom = easy_cnt + med_cnt + hard_cnt
+        if total_custom == total_quiz:
+            return ["easy"] * easy_cnt + ["medium"] * med_cnt + ["advanced"] * hard_cnt
+
+    diff_lower = (unit_diff or "medium").lower()
+    if diff_lower == "easy":
+        easy_cnt = max(1, math.ceil(total_quiz * 0.50))
+        hard_cnt = max(1, math.floor(total_quiz * 0.15))
+        med_cnt = max(0, total_quiz - easy_cnt - hard_cnt)
+    elif diff_lower in ["advanced", "hard"]:
+        hard_cnt = max(1, math.ceil(total_quiz * 0.50))
+        easy_cnt = max(1, math.floor(total_quiz * 0.15))
+        med_cnt = max(0, total_quiz - easy_cnt - hard_cnt)
+    else:  # medium
+        easy_cnt = max(1, round(total_quiz * 0.30))
+        hard_cnt = max(1, round(total_quiz * 0.30))
+        med_cnt = max(0, total_quiz - easy_cnt - hard_cnt)
+
+    current_total = easy_cnt + med_cnt + hard_cnt
+    if current_total != total_quiz:
+        med_cnt += (total_quiz - current_total)
+
+    return ["easy"] * easy_cnt + ["medium"] * med_cnt + ["advanced"] * hard_cnt
 
 
 class ObjectiveSupportEvaluation(BaseModel):
@@ -232,49 +267,48 @@ def plan_unit(unit: Unit, db: Session) -> Dict[str, Any]:
         )
         slots_to_create.append(s_rev)
 
-    # 2b. Quiz items distribution
+    # 2b. Quiz items distribution (Respects configured quiz_count and difficulty distribution)
     num_supported = len(supported_objectives)
-    total_quiz = max(num_supported, unit.quiz_count)
+    total_quiz = max(num_supported, unit.quiz_count if unit.quiz_count is not None else 5)
+    custom_dist = unit.constraints.get("difficulty_distribution") if unit.constraints and isinstance(unit.constraints, dict) else None
+    diff_list = calculate_difficulty_distribution(total_quiz, unit.difficulty, custom_dist)
     for i in range(total_quiz):
         pos += 1
         obj = supported_objectives[i % num_supported]
+        diff = diff_list[i] if i < len(diff_list) else (unit.difficulty or "medium")
         s_quiz = Slot(
             unit_id=unit.id,
             objective_id=obj.id,
             type="quiz_item",
             position=pos,
-            difficulty=unit.difficulty,
-            bloom_tag=get_bloom_target_for_difficulty(unit.difficulty, obj.bloom_target),
+            difficulty=diff,
+            bloom_tag=get_bloom_target_for_question(diff, obj.bloom_target or "Understand", i),
         )
         slots_to_create.append(s_quiz)
 
-    # 2c. Practice Foundation items (5 items)
-    total_foundation = max(5, num_supported)
-    for i in range(total_foundation):
+    # 2c. Practice Foundation items (1 distinct introductory item per supported objective)
+    for i, obj in enumerate(supported_objectives):
         pos += 1
-        obj = supported_objectives[i % num_supported]
         s_found = Slot(
             unit_id=unit.id,
             objective_id=obj.id,
             type="practice_foundation",
             position=pos,
             difficulty="easy",
-            bloom_tag="Remember",
+            bloom_tag=get_bloom_target_for_question("easy", obj.bloom_target or "Understand", i),
         )
         slots_to_create.append(s_found)
 
-    # 2d. Practice Advanced items (5 items)
-    total_advanced = max(5, num_supported)
-    for i in range(total_advanced):
+    # 2d. Practice Advanced items (1 distinct rigorous analytical item per supported objective)
+    for i, obj in enumerate(supported_objectives):
         pos += 1
-        obj = supported_objectives[i % num_supported]
         s_adv = Slot(
             unit_id=unit.id,
             objective_id=obj.id,
             type="practice_advanced",
             position=pos,
             difficulty="advanced",
-            bloom_tag="Analyze",
+            bloom_tag=get_bloom_target_for_question("advanced", obj.bloom_target or "Analyze", i),
         )
         slots_to_create.append(s_adv)
 
@@ -299,6 +333,8 @@ def plan_unit(unit: Unit, db: Session) -> Dict[str, Any]:
         blueprint_summary.append({
             "slot_id": s.id,
             "objective_id": s.objective_id,
+            "objective_position": s.objective.position if s.objective else (supported_objectives.index(s.objective) + 1 if s.objective in supported_objectives else 1),
+            "objective_text": s.objective.text if s.objective else "",
             "type": s.type,
             "position": s.position,
             "difficulty": s.difficulty,

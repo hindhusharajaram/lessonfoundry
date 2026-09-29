@@ -81,6 +81,8 @@ export interface Slot {
   id: number;
   unit_id: number;
   objective_id: number;
+  objective_position?: number;
+  objective_text?: string;
   type: SlotType;
   position: number;
   difficulty?: string;

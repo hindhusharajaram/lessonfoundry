@@ -9,11 +9,13 @@ from db.database import get_db
 from db.models import (
     Asset,
     AttemptAnswer,
+    Enrollment,
     Publication,
     QuizAttempt,
     Slot,
     Student,
     Unit,
+    User,
 )
 
 router = APIRouter(prefix="/student", tags=["student"])
@@ -144,10 +146,13 @@ def submit_student_attempt(
     """
     Grade and record student quiz submission.
     """
-    student_id = auth.student_id or 1
-    student = db.query(Student).filter(Student.id == student_id).first()
+    student = None
+    if auth.user_id:
+        student = db.query(Student).filter(Student.student_user_id == auth.user_id).first()
+    if not student and auth.student_id:
+        student = db.query(Student).filter(Student.id == auth.student_id).first()
     if not student:
-        # Create student if demo ID
+        student_id = auth.student_id or 1
         student = Student(name=f"Student #{student_id}", class_label="Demo Class", synthetic=True)
         db.add(student)
         db.flush()
@@ -226,13 +231,15 @@ def get_attempt_results(
         )
 
     results = []
+    is_teacher_only = attempt.unit and attempt.unit.answer_visibility == "teacher_only"
     for ans in attempt.answers:
         asset = ans.asset
         content = asset.current_version.content if asset and asset.current_version else {}
         options = content.get("options", [])
         chosen_opt = options[ans.chosen_index] if (0 <= ans.chosen_index < len(options)) else "Unknown"
-        correct_idx = content.get("correct_index", 0)
-        correct_opt = options[correct_idx] if (0 <= correct_idx < len(options)) else "Unknown"
+        raw_correct_idx = content.get("correct_index", 0)
+        correct_idx = None if is_teacher_only else raw_correct_idx
+        correct_opt = None if is_teacher_only else (options[raw_correct_idx] if (0 <= raw_correct_idx < len(options)) else "Unknown")
 
         results.append({
             "asset_id": ans.asset_id,
@@ -243,8 +250,8 @@ def get_attempt_results(
             "correct_index": correct_idx,
             "correct_option": correct_opt,
             "correct": ans.correct,
-            "rationale": content.get("rationale", ""),
-            "supporting_quote": content.get("quote", ""),
+            "rationale": None if is_teacher_only else content.get("rationale", ""),
+            "supporting_quote": None if is_teacher_only else content.get("quote", ""),
             "time_seconds": ans.time_seconds,
         })
 
@@ -257,3 +264,72 @@ def get_attempt_results(
         "submitted_at": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
         "results": results,
     }
+
+
+class StudentEnrollRequest(BaseModel):
+    join_code: str
+
+
+@router.post("/enroll")
+def enroll_student_by_code(
+    req: StudentEnrollRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_student),
+):
+    """
+    Enrolls the current student with a teacher using a valid join code.
+    """
+    code = req.join_code.strip().upper()
+    teacher = db.query(User).filter(User.join_code == code, User.role == "teacher").first()
+    if not teacher:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid join code '{req.join_code}'. Teacher not found.",
+        )
+
+    # Determine student user and student record
+    student_user_id = auth.user_id
+    if not student_user_id:
+        student_rec = db.query(Student).filter(Student.id == (auth.student_id or 1)).first()
+        if student_rec and student_rec.student_user_id:
+            student_user_id = student_rec.student_user_id
+        else:
+            user = User(
+                email=f"student_{auth.student_id or 1}@lessonfoundry.edu",
+                name=student_rec.name if student_rec else f"Student #{auth.student_id or 1}",
+                role="student",
+            )
+            db.add(user)
+            db.flush()
+            student_user_id = user.id
+            if student_rec:
+                student_rec.student_user_id = user.id
+                db.flush()
+
+    # Create enrollment if not already existing
+    existing = db.query(Enrollment).filter(
+        Enrollment.teacher_user_id == teacher.id,
+        Enrollment.student_user_id == student_user_id,
+    ).first()
+
+    if not existing:
+        enrollment = Enrollment(
+            teacher_user_id=teacher.id,
+            student_user_id=student_user_id,
+        )
+        db.add(enrollment)
+        db.commit()
+
+    # Update student record class label
+    st = db.query(Student).filter(Student.student_user_id == student_user_id).first()
+    if st:
+        st.class_label = f"Class {teacher.name}"
+        db.commit()
+
+    return {
+        "message": f"Successfully enrolled with teacher {teacher.name}.",
+        "teacher_id": teacher.id,
+        "teacher_name": teacher.name,
+        "student_user_id": student_user_id,
+    }
+

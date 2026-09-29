@@ -34,7 +34,7 @@ class UnitCreateRequest(BaseModel):
     language: str = "English"
     answer_visibility: str = "after_submission"
     constraints: Optional[Dict[str, Any]] = None
-    quiz_count: int = 5
+    quiz_count: int = Field(default=5, ge=5, description="Number of formative quiz questions (minimum 5)")
 
 
 class ObjectiveInput(BaseModel):
@@ -93,7 +93,7 @@ def create_unit(
         language=req.language,
         answer_visibility=req.answer_visibility,
         constraints=req.constraints or {},
-        quiz_count=req.quiz_count,
+        quiz_count=max(5, req.quiz_count or 5),
         status="draft",
     )
     db.add(unit)
@@ -213,7 +213,9 @@ def update_objectives(
             detail="At least 2 learning objectives are required.",
         )
 
-    # Delete existing objectives (cascades to old slots/assets)
+    # Delete existing slots and objectives (cascades to old assets)
+    for old_slot in unit.slots:
+        db.delete(old_slot)
     for old_obj in unit.objectives:
         db.delete(old_obj)
     db.flush()
@@ -384,6 +386,9 @@ def get_unit_pack(
             "position": s.position,
             "difficulty": s.difficulty,
             "bloom_tag": s.bloom_tag,
+            "objective_id": s.objective_id,
+            "objective_position": s.objective.position if s.objective else None,
+            "objective_text": s.objective.text if s.objective else None,
             "asset": asset_info,
         }
 

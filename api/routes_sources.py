@@ -107,15 +107,91 @@ def _get_page_for_offset(char_offset: int, page_ranges: Optional[List[Tuple[int,
     return page_ranges[-1][0] if page_ranges else 1
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+_ocr_engine = None
+
+
+def get_ocr_engine():
+    """Lazily load the RapidOCR engine to minimize startup overhead."""
+    global _ocr_engine
+    if _ocr_engine is None:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _ocr_engine = RapidOCR()
+        except Exception as e:
+            logger.warning(f"Could not initialize RapidOCR: {e}")
+            _ocr_engine = None
+    return _ocr_engine
+
+
+def ocr_page_image(page) -> str:
+    """Render PDF page as high-resolution pixmap and perform OCR extraction."""
+    ocr = get_ocr_engine()
+    if ocr is None:
+        return ""
+    try:
+        # Render at 150 DPI for fast, crisp text recognition
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        result, _ = ocr(img_bytes)
+        if not result:
+            return ""
+        # Sort text boxes top-to-bottom, left-to-right
+        sorted_boxes = sorted(result, key=lambda r: (r[0][0][1], r[0][0][0]))
+        lines = [item[1].strip() for item in sorted_boxes if item and len(item) > 1 and item[1].strip()]
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"OCR page extraction failed on page: {e}")
+        return ""
+
+
 def extract_pdf_content(file_bytes: bytes) -> Tuple[str, List[Tuple[int, int, int]]]:
-    """Extract text from PDF using PyMuPDF and record page character spans."""
-    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    """
+    Extract text from PDF using PyMuPDF and OCR fallback for scanned/image pages.
+    Records precise page character spans (page_num, start_offset, end_offset).
+    """
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+    except Exception as e:
+        logger.error(f"Failed to open PDF stream: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not parse PDF file. The document may be corrupted or not a valid PDF format.",
+        )
+
+    if doc.is_encrypted or doc.needs_pass:
+        doc.close()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded PDF is password-protected or encrypted. Please remove password protection and try again.",
+        )
+
+    if len(doc) == 0:
+        doc.close()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded PDF contains no pages.",
+        )
+
     full_text_parts = []
     page_ranges = []
     current_offset = 0
 
     for i, page in enumerate(doc):
-        page_text = normalize_whitespace(page.get_text("text"))
+        # 1. First attempt native digital text extraction
+        raw_page_text = page.get_text("text")
+        page_text = normalize_whitespace(raw_page_text)
+
+        # 2. If native text is absent or extremely sparse, attempt OCR on page image
+        if len(page_text) < 20:
+            ocr_text = ocr_page_image(page)
+            ocr_text_norm = normalize_whitespace(ocr_text)
+            if len(ocr_text_norm) > len(page_text):
+                page_text = ocr_text_norm
+
         if page_text:
             if full_text_parts:
                 full_text_parts.append("\n\n")
@@ -127,6 +203,13 @@ def extract_pdf_content(file_bytes: bytes) -> Tuple[str, List[Tuple[int, int, in
 
     doc.close()
     full_text = "".join(full_text_parts)
+
+    if not full_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source document contains no extractable text or readable images. Please provide a document with legible curriculum content.",
+        )
+
     return full_text, page_ranges
 
 
@@ -152,14 +235,44 @@ async def upload_source(
     filename = "pasted_text.txt"
     page_ranges: List[Tuple[int, int, int]] = []
 
-    if file is not None:
+    has_file = file is not None and bool(file.filename)
+    has_text = bool(text and text.strip())
+
+    if has_file and has_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot provide both a file upload and pasted text. Please choose exactly one input method.",
+        )
+    if not has_file and not has_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either a file upload or text content must be provided.",
+        )
+
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    MAX_TEXT_LEN = 150000  # 150,000 characters
+
+    if has_file and file is not None:
         filename = file.filename or "uploaded_file"
         content_bytes = await file.read()
+        if len(content_bytes) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The uploaded file is empty (0 bytes).",
+            )
+        if len(content_bytes) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File size exceeds the maximum allowed limit of {MAX_FILE_SIZE // (1024 * 1024)}MB.",
+            )
         lower_name = filename.lower()
         if lower_name.endswith(".pdf"):
             try:
                 raw_text, page_ranges = extract_pdf_content(content_bytes)
+            except HTTPException:
+                raise
             except Exception as e:
+                logger.error(f"Unexpected error during PDF extraction: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Could not parse PDF file: {str(e)}",
@@ -167,18 +280,17 @@ async def upload_source(
         elif lower_name.endswith(".txt") or lower_name.endswith(".md"):
             raw_text = normalize_whitespace(content_bytes.decode("utf-8", errors="replace"))
         else:
-            # Spec: PDF, TXT, DOCX-less (PDF/TXT only)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unsupported file format. Please upload a PDF or TXT file, or paste text.",
+                detail="Unsupported file format. Please upload a PDF (.pdf) or Text (.txt, .md) file.",
             )
-    elif text:
+    elif has_text and text:
+        if len(text) > MAX_TEXT_LEN:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Text content exceeds the maximum allowed limit of {MAX_TEXT_LEN} characters.",
+            )
         raw_text = normalize_whitespace(text)
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either a file upload or text content must be provided.",
-        )
 
     if not raw_text.strip():
         raise HTTPException(

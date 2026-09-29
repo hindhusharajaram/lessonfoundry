@@ -263,7 +263,7 @@ def run_demo():
             "target_grade": "High School Biology",
             "difficulty": "medium",
             "language": "English",
-            "quiz_count": 4,
+            "quiz_count": 5,
         },
         headers={"X-Role": "teacher"},
     )

@@ -1,8 +1,8 @@
 # LessonFoundry Automated Evaluation Benchmark Report
 
-**Execution Timestamp:** `2026-09-29 01:27:04 UTC`  
+**Execution Timestamp:** `2026-09-29 17:25:33 UTC`  
 **Primary Engine Model:** `gemini-2.5-flash`  
-**Execution Duration:** `5.11s`  
+**Execution Duration:** `8.87s`  
 
 ---
 

@@ -1,7 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  Sparkles,
   Home,
   PlusCircle,
   BookOpen,
@@ -9,20 +8,21 @@ import {
   Settings,
   GraduationCap,
   FileText,
-  UserCheck,
+  ShieldCheck,
   ChevronRight,
+  LogOut,
 } from 'lucide-react';
 import { useRole } from '../../context/RoleContext';
 
 export const Sidebar: React.FC = () => {
-  const { role, setRole, studentName } = useRole();
+  const { role, teacherName, studentName, avatarUrl, logout } = useRole();
   const navigate = useNavigate();
 
   const teacherLinks = [
     { to: '/', label: 'Home', icon: Home, end: true },
     { to: '/create', label: 'Create Learning Unit', icon: PlusCircle },
-    { to: '/units', label: 'My Units', icon: BookOpen },
     { to: '/analytics', label: 'Student Analytics', icon: BarChart3 },
+    { to: '/trust-safety', label: 'Trust & Safety', icon: ShieldCheck },
     { to: '/settings', label: 'Settings', icon: Settings },
   ];
 
@@ -35,64 +35,22 @@ export const Sidebar: React.FC = () => {
 
   const currentLinks = role === 'teacher' ? teacherLinks : studentLinks;
 
-  const handleRoleToggle = () => {
-    const nextRole = role === 'teacher' ? 'student' : 'teacher';
-    setRole(nextRole);
-    if (nextRole === 'teacher') {
-      navigate('/');
-    } else {
-      navigate('/student');
-    }
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
   };
 
   return (
     <aside className="w-64 bg-[#0B1437] text-white flex flex-col min-h-screen shrink-0 border-r border-[#1A234A] select-none">
       {/* Brand Header */}
-      <div className="p-6 pb-5 flex items-center gap-3 border-b border-[#1A234A]/80">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] flex items-center justify-center shadow-md shadow-indigo-500/20">
-          <Sparkles className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <div className="flex items-center gap-1.5">
-            <span className="font-bold text-lg tracking-tight text-white">LearnAI</span>
-            <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-              Studio
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-400">Evidence-Locked GenAI</p>
-        </div>
-      </div>
-
-      {/* Role Indicator Banner */}
-      <div className="px-4 py-3 bg-[#111C44]/90 mx-3 my-3 rounded-xl border border-[#1A234A] flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div
-            className={`w-2 h-2 rounded-full ${
-              role === 'teacher' ? 'bg-emerald-400 animate-pulse' : 'bg-indigo-400'
-            }`}
-          />
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              Active View
-            </div>
-            <div className="text-xs font-medium text-slate-200">
-              {role === 'teacher' ? 'Teacher Mode' : `Student: ${studentName}`}
-            </div>
-          </div>
-        </div>
-        <button
-          onClick={handleRoleToggle}
-          className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold px-2 py-1 rounded bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-800/60 transition-colors"
-          title="Switch Role"
-        >
-          Switch
-        </button>
+      <div className="p-6 pb-5 flex items-center border-b border-[#1A234A]/80">
+        <span className="font-bold text-xl tracking-tight text-white">LessonFoundry</span>
       </div>
 
       {/* Navigation Links */}
-      <div className="flex-1 px-3 py-2 space-y-1">
+      <div className="flex-1 px-3 py-3 space-y-1">
         <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400/80">
-          {role === 'teacher' ? 'Teacher Workspace' : 'Student Portal'}
+          {role === 'teacher' ? 'WORKSPACE' : 'STUDENT PORTAL'}
         </div>
         {currentLinks.map((link) => {
           const Icon = link.icon;
@@ -123,15 +81,51 @@ export const Sidebar: React.FC = () => {
         })}
       </div>
 
-      {/* Bottom Footer Info */}
-      <div className="p-4 border-t border-[#1A234A] text-[11px] text-slate-400 bg-[#0B1437]">
-        <div className="flex items-center gap-2 mb-2 text-slate-300">
-          <GraduationCap className="w-4 h-4 text-indigo-400" />
-          <span className="font-semibold text-xs text-white">Non-Negotiable Rule</span>
+      {/* User Profile & Working Logout */}
+      <div className="p-3 border-t border-[#1A234A] bg-[#070D24]/60 space-y-2">
+        <div className="px-3 py-2 rounded-xl bg-[#111C44]/90 border border-[#1A234A] flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt="Profile"
+                className="w-7 h-7 rounded-lg object-cover border border-indigo-500/40 shrink-0"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 font-bold text-xs shrink-0">
+                {role === 'teacher'
+                  ? (teacherName ? teacherName.slice(0, 2).toUpperCase() : 'TC')
+                  : (studentName ? studentName.slice(0, 2).toUpperCase() : 'ST')}
+              </div>
+            )}
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-white truncate">
+                {role === 'teacher' ? teacherName : studentName}
+              </div>
+              <div className="text-[10px] text-slate-400 capitalize">{role || 'User'}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            title="Log Out"
+            aria-label="Log Out"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
-        <p className="text-[11px] text-slate-400 leading-snug">
-          Source text is untrusted data. Every generated sentence carries verifiable evidence.
-        </p>
+      </div>
+
+      {/* Bottom Footer Info: Replaced permanent text with single icon & hover tooltip per specification */}
+      <div className="px-4 py-3 border-t border-[#1A234A] flex items-center justify-center text-slate-400 bg-[#0B1437]">
+        <div
+          title="Non-Negotiable Rule: Source text is untrusted data. Every generated sentence carries verifiable evidence."
+          aria-label="Non-Negotiable Rule: Source text is untrusted data. Every generated sentence carries verifiable evidence."
+          className="p-1.5 rounded-lg text-indigo-400/80 hover:text-indigo-300 hover:bg-[#111C44] transition-colors cursor-help inline-flex items-center"
+        >
+          <ShieldCheck className="w-4 h-4" />
+        </div>
       </div>
     </aside>
   );
