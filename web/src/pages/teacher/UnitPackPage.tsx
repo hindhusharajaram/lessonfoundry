@@ -94,6 +94,29 @@ export const UnitPackPage: React.FC = () => {
   const [assetVersions, setAssetVersions] = useState<AssetVersion[]>([]);
   const [versionDiffs, setVersionDiffs] = useState<any[]>([]);
 
+  // Preview Impact Modal
+  const [impactModalOpen, setImpactModalOpen] = useState<boolean>(false);
+  const [impactChangeParam, setImpactChangeParam] = useState<string>('difficulty:medium->advanced');
+  const [impactResult, setImpactResult] = useState<any>(null);
+  const [impactLoading, setImpactLoading] = useState<boolean>(false);
+
+  const handlePreviewImpact = async (customChange?: string) => {
+    const changeToQuery = customChange || impactChangeParam;
+    try {
+      setImpactLoading(true);
+      if (customChange) {
+        setImpactChangeParam(customChange);
+      }
+      const res = await api.getChangeImpact(unitId, changeToQuery);
+      setImpactResult(res);
+      setImpactModalOpen(true);
+    } catch (err: any) {
+      alert(err.message || 'Failed to preview change impact');
+    } finally {
+      setImpactLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadPackData();
   }, [unitId]);
@@ -245,12 +268,21 @@ export const UnitPackPage: React.FC = () => {
       <Card className="p-6">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-[#4F46E5]">
                 {pack.unit.target_grade}
               </span>
               <span className="text-xs text-slate-400 capitalize">• {pack.unit.difficulty} difficulty</span>
               <span className="text-xs text-slate-400">• {pack.unit.language}</span>
+              <button
+                type="button"
+                onClick={() => handlePreviewImpact(`difficulty:${pack.unit.difficulty}->${pack.unit.difficulty === 'medium' ? 'advanced' : 'medium'}`)}
+                className="ml-2 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg inline-flex items-center gap-1 transition-colors cursor-pointer"
+                title="Preview impact of parameter changes on pedagogical assets"
+              >
+                <Zap className="w-3 h-3 text-amber-600" />
+                Preview Impact
+              </button>
             </div>
             <h1 className="text-xl font-bold text-slate-900">{pack.unit.title}</h1>
             <p className="text-xs text-slate-500">
@@ -922,6 +954,125 @@ export const UnitPackPage: React.FC = () => {
               </div>
             </div>
           ))}
+        </div>
+      </Modal>
+
+      {/* Preview Change Impact Modal */}
+      <Modal
+        isOpen={impactModalOpen}
+        onClose={() => setImpactModalOpen(false)}
+        title="Preview Parameter Change Impact"
+        subtitle="Inspect downstream affected vs unaffected pedagogical assets and rationale."
+        maxWidth="lg"
+        footer={
+          <Button variant="outline" onClick={() => setImpactModalOpen(false)}>
+            Close
+          </Button>
+        }
+      >
+        <div className="space-y-4 text-xs">
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Select Proposed Change:
+            </label>
+            <div className="flex items-center gap-2">
+              <select
+                value={impactChangeParam}
+                onChange={(e) => {
+                  setImpactChangeParam(e.target.value);
+                  handlePreviewImpact(e.target.value);
+                }}
+                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800"
+              >
+                <option value="difficulty:medium->advanced">Difficulty: Medium &rarr; Advanced</option>
+                <option value="difficulty:advanced->easy">Difficulty: Advanced &rarr; Easy</option>
+                <option value="difficulty:easy->advanced">Difficulty: Easy &rarr; Advanced</option>
+                <option value="target_grade:High School->Middle School">Target Grade: High School &rarr; Middle School</option>
+                <option value="source_version:1->2">Source Document: Update Version (v1 &rarr; v2)</option>
+                <option value="objective:1:edit">Objective #1: Text Refinement</option>
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePreviewImpact()}
+                isLoading={impactLoading}
+              >
+                Recalculate
+              </Button>
+            </div>
+          </div>
+
+          {impactLoading ? (
+            <div className="p-6 text-center text-slate-500">
+              <div className="animate-spin w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-2" />
+              Analyzing downstream dependencies...
+            </div>
+          ) : impactResult ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+                <span className="font-semibold text-slate-700">Scope:</span>
+                <span className="text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                  {impactResult.affected_count} Affected
+                </span>
+                <span className="text-slate-600 font-semibold bg-white px-2 py-0.5 rounded border border-slate-200">
+                  {impactResult.unaffected_count} Unaffected
+                </span>
+              </div>
+
+              {/* Affected List */}
+              <div className="space-y-2">
+                <h4 className="font-bold text-amber-800 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  Affected: [{impactResult.affected_slots?.map((s: any) => s.name || s.type).join(', ') || 'None'}]
+                </h4>
+                {impactResult.affected_slots?.length > 0 ? (
+                  <ul className="space-y-2 pl-2">
+                    {impactResult.affected_slots.map((s: any) => (
+                      <li key={s.slot_id} className="p-2.5 bg-amber-50/60 border border-amber-200/80 rounded-lg text-slate-800 space-y-1">
+                        <div className="font-semibold text-amber-900 flex items-center justify-between">
+                          <span>{s.name || `Slot #${s.position}: ${s.type}`}</span>
+                          {s.is_approved && (
+                            <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-medium">
+                              Approved (Preserved)
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
+                          {s.reason}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-slate-500 italic pl-3">No assets affected by this change.</p>
+                )}
+              </div>
+
+              {/* Unaffected List */}
+              <div className="space-y-2">
+                <h4 className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  Unaffected: [{impactResult.unaffected_slots?.map((s: any) => s.name || s.type).join(', ') || 'None'}]
+                </h4>
+                {impactResult.unaffected_slots?.length > 0 ? (
+                  <ul className="space-y-2 pl-2">
+                    {impactResult.unaffected_slots.map((s: any) => (
+                      <li key={s.slot_id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 space-y-1">
+                        <div className="font-semibold text-slate-900">
+                          {s.name || `Slot #${s.position}: ${s.type}`}
+                        </div>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+                          {s.reason}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-slate-500 italic pl-3">No assets in unaffected group.</p>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       </Modal>
     </div>

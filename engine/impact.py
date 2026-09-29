@@ -7,6 +7,20 @@ from engine.guardrails import run_unit_guardrails
 from engine.solver import verify_asset_with_solver
 
 
+def _get_slot_name(slot: Slot) -> str:
+    type_display = slot.type.replace("_", " ").title()
+    content = (
+        slot.asset.current_version.content
+        if (slot.asset and slot.asset.current_version and isinstance(slot.asset.current_version.content, dict))
+        else {}
+    )
+    title = content.get("title") or content.get("question") or content.get("summary")
+    if title:
+        short_title = title[:50] + ("..." if len(title) > 50 else "")
+        return f"{type_display} (#{slot.position}): {short_title}"
+    return f"{type_display} (Slot #{slot.position})"
+
+
 def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> Dict[str, Any]:
     """
     Analyzes the downstream impact of proposed changes to a Unit:
@@ -35,6 +49,7 @@ def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> 
             if s.type in ["quiz_item", "practice_foundation", "practice_advanced"]:
                 affected_slots.append({
                     "slot_id": s.id,
+                    "name": _get_slot_name(s),
                     "type": s.type,
                     "position": s.position,
                     "objective_id": s.objective_id,
@@ -45,6 +60,7 @@ def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> 
             else:
                 unaffected_slots.append({
                     "slot_id": s.id,
+                    "name": _get_slot_name(s),
                     "type": s.type,
                     "position": s.position,
                     "objective_id": s.objective_id,
@@ -60,6 +76,7 @@ def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> 
             is_approved = bool(s.asset and s.asset.status == "approved")
             affected_slots.append({
                 "slot_id": s.id,
+                "name": _get_slot_name(s),
                 "type": s.type,
                 "position": s.position,
                 "objective_id": s.objective_id,
@@ -82,6 +99,7 @@ def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> 
             if target_obj_id is not None and s.objective_id == target_obj_id:
                 affected_slots.append({
                     "slot_id": s.id,
+                    "name": _get_slot_name(s),
                     "type": s.type,
                     "position": s.position,
                     "objective_id": s.objective_id,
@@ -92,6 +110,7 @@ def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> 
             else:
                 unaffected_slots.append({
                     "slot_id": s.id,
+                    "name": _get_slot_name(s),
                     "type": s.type,
                     "position": s.position,
                     "objective_id": s.objective_id,
@@ -107,6 +126,7 @@ def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> 
             is_approved = bool(s.asset and s.asset.status == "approved")
             affected_slots.append({
                 "slot_id": s.id,
+                "name": _get_slot_name(s),
                 "type": s.type,
                 "position": s.position,
                 "objective_id": s.objective_id,
@@ -121,6 +141,7 @@ def analyze_change_impact(unit_id: int, change_descriptor: str, db: Session) -> 
             is_approved = bool(s.asset and s.asset.status == "approved")
             affected_slots.append({
                 "slot_id": s.id,
+                "name": _get_slot_name(s),
                 "type": s.type,
                 "position": s.position,
                 "objective_id": s.objective_id,

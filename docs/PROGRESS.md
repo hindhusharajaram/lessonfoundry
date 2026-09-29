@@ -187,6 +187,34 @@
   - Pytest: **32 passed, 1 skipped**.
   - Frontend production build: `tsc -b && vite build` passed cleanly in 774ms.
 
+---
+
+## Change Impact Engine Audit & Teacher UI Preview Integration
+
+### 1. Audit Findings (Already Existed vs Newly Built)
+
+- **Already Existed**:
+  - **Backend Route**: `GET /api/units/{unit_id}/impact` was already implemented in [`api/routes_units.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/api/routes_units.py) and called `analyze_change_impact(unit_id, change, db)`.
+  - **Core Impact Engine**: [`engine/impact.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/impact.py) already contained the deterministic categorization logic for `difficulty:old->new`, `target_grade:old->new`, `objective:{id}:edit`, and `source_version:{old_v}->{new_v}`.
+  - **Regeneration Endpoint**: `POST /api/units/{unit_id}/regenerate-affected` was also wired to preserve approved assets while regenerating unapproved draft slots.
+  - **Full Impact View Tab**: `ChangeImpactView.tsx` component existed under the "Change Impact" tab.
+
+- **Newly Built / Enhanced**:
+  - **Human-Readable Asset Names in API Response**: Enhanced [`engine/impact.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/impact.py) with a `_get_slot_name()` helper so `affected_slots` and `unaffected_slots` return friendly title/question descriptors (e.g., `"Quiz Item (#7): Where do the light-dependent..."`) along with slot types and specific reason strings.
+  - **API Client Service Types**: Cleaned and strongly typed `getChangeImpact` and `regenerateAffected` in [`web/src/services/api.ts`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/services/api.ts).
+  - **Teacher Studio / Review Quick Preview Button**: Added a clean, minimal `"Preview Impact"` button in the Unit Settings header of [`web/src/pages/teacher/UnitPackPage.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/pages/teacher/UnitPackPage.tsx) next to the difficulty/grade badges.
+  - **Minimal Plain List Preview Modal**: Implemented a lightweight modal in `UnitPackPage.tsx` that displays:
+    - Change parameter selector (e.g. `difficulty:medium->advanced`, `target_grade`, `source_version`, `objective`).
+    - Summary badge (`N Affected • M Unaffected`).
+    - **Affected: [asset names]** simple list with each item's name, type, and specific reason string from the API.
+    - **Unaffected: [asset names]** simple list with each item's name, type, and specific reason string from the API.
+  - **Automated Pytest Rule Test**: Added `test_difficulty_change_affects_practice_not_revision` in [`tests/test_advanced_features.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_advanced_features.py) verifying that changing unit difficulty correctly flags `practice_foundation`, `practice_advanced`, and `quiz_item` as affected, and keeps `explanation` and `revision` unaffected.
+  - **Verification**:
+    - Pytest: **33 passed, 1 skipped in 5.38s (100% pass rate)**.
+    - Frontend Build: `npm run build` (`tsc -b && vite build`) passed with **0 errors**.
+    - Live Endpoint Verification: Manually hit `GET http://127.0.0.1:8000/api/units/1/impact?change=difficulty:medium->advanced` on the running dev server, confirming live JSON response with 14 affected items and 6 unaffected items.
+
+
 
 
 

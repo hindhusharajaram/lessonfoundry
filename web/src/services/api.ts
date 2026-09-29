@@ -264,23 +264,38 @@ export const api = {
   },
 
   // Impact Engine
-  async getChangeImpact(unitId: number, change: string): Promise<{
+  async getChangeImpact(unitId: number, change: string = 'difficulty:medium->advanced'): Promise<{
     unit_id: number;
-    change: string;
-    affected_slots: number[];
-    unaffected_slots: number[];
-    reasons: Record<string, string>;
+    change_descriptor: string;
+    total_slots: number;
+    affected_count: number;
+    unaffected_count: number;
     approved_stale_count: number;
+    affected_slots: Array<{
+      slot_id: number;
+      name?: string;
+      type: string;
+      position: number;
+      objective_id: number;
+      is_approved: boolean;
+      current_status: string;
+      reason: string;
+    }>;
+    unaffected_slots: Array<{
+      slot_id: number;
+      name?: string;
+      type: string;
+      position: number;
+      objective_id: number;
+      is_approved: boolean;
+      current_status: string;
+      reason: string;
+    }>;
   }> {
     return request(`/units/${unitId}/impact?change=${encodeURIComponent(change)}`);
   },
 
-  async regenerateAffected(unitId: number, change: string): Promise<{
-    unit_id: number;
-    regenerated_count: number;
-    approved_stale_preserved: number;
-    stale_asset_ids: number[];
-  }> {
+  async regenerateAffected(unitId: number, change: string): Promise<any> {
     return request(`/units/${unitId}/regenerate-affected`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

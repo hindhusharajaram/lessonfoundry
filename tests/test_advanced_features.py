@@ -639,3 +639,113 @@ def test_student_quiz_results_and_learning_gap_analytics():
 
     session.close()
 
+
+def test_difficulty_change_affects_practice_not_revision():
+    """
+    Test confirming GET /api/units/{id}/impact with a difficulty change correctly marks
+    practice items (practice_foundation, practice_advanced, quiz_item) as affected
+    and revision summary/explanation as unaffected with clear reason strings.
+    """
+    session = SessionLocal()
+    src = Source(title="Cellular Biology", filename="cells.txt")
+    session.add(src)
+    session.flush()
+
+    s_ver = SourceVersion(
+        source_id=src.id,
+        version_no=1,
+        text="Mitochondria produce ATP via cellular respiration.",
+        sha256="hash_cells_123",
+    )
+    session.add(s_ver)
+    session.flush()
+
+    unit = Unit(
+        title="Cellular Energetics",
+        source_id=src.id,
+        pinned_source_version_id=s_ver.id,
+        difficulty="medium",
+        target_grade="High School",
+    )
+    session.add(unit)
+    session.flush()
+
+    obj = Objective(unit_id=unit.id, position=1, text="Understand ATP production", supported=True)
+    session.add(obj)
+    session.flush()
+
+    # Create 5 slots of distinct pedagogical types
+    slot_exp = Slot(unit_id=unit.id, objective_id=obj.id, type="explanation", position=1)
+    slot_pf = Slot(unit_id=unit.id, objective_id=obj.id, type="practice_foundation", position=2)
+    slot_pa = Slot(unit_id=unit.id, objective_id=obj.id, type="practice_advanced", position=3)
+    slot_quiz = Slot(unit_id=unit.id, objective_id=obj.id, type="quiz_item", position=4)
+    slot_rev = Slot(unit_id=unit.id, objective_id=obj.id, type="revision", position=5)
+    session.add_all([slot_exp, slot_pf, slot_pa, slot_quiz, slot_rev])
+    session.flush()
+
+    # Create assets for all slots
+    a_exp = Asset(slot_id=slot_exp.id, status="draft")
+    a_pf = Asset(slot_id=slot_pf.id, status="draft")
+    a_pa = Asset(slot_id=slot_pa.id, status="draft")
+    a_quiz = Asset(slot_id=slot_quiz.id, status="draft")
+    a_rev = Asset(slot_id=slot_rev.id, status="draft")
+    session.add_all([a_exp, a_pf, a_pa, a_quiz, a_rev])
+    session.flush()
+
+    # Create asset versions with readable content titles
+    av_exp = AssetVersion(asset_id=a_exp.id, version_no=1, content={"title": "Mitochondria Overview"}, model="gemini", source_sha256="hash_cells_123")
+    av_pf = AssetVersion(asset_id=a_pf.id, version_no=1, content={"title": "Foundation ATP Practice"}, model="gemini", source_sha256="hash_cells_123")
+    av_pa = AssetVersion(asset_id=a_pa.id, version_no=1, content={"title": "Advanced Cellular Analysis"}, model="gemini", source_sha256="hash_cells_123")
+    av_quiz = AssetVersion(asset_id=a_quiz.id, version_no=1, content={"question": "Where is ATP synthesized?"}, model="gemini", source_sha256="hash_cells_123")
+    av_rev = AssetVersion(asset_id=a_rev.id, version_no=1, content={"summary": "Key Takeaways on ATP"}, model="gemini", source_sha256="hash_cells_123")
+    session.add_all([av_exp, av_pf, av_pa, av_quiz, av_rev])
+    session.flush()
+
+    a_exp.current_version_id = av_exp.id
+    a_pf.current_version_id = av_pf.id
+    a_pa.current_version_id = av_pa.id
+    a_quiz.current_version_id = av_quiz.id
+    a_rev.current_version_id = av_rev.id
+    session.commit()
+
+    unit_id = unit.id
+    session.close()
+
+    # Hit the GET /api/units/{id}/impact endpoint
+    response = client.get(
+        f"/api/units/{unit_id}/impact?change=difficulty:medium->advanced",
+        headers={"X-Role": "teacher"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["unit_id"] == unit_id
+    assert data["change_descriptor"] == "difficulty:medium->advanced"
+    assert data["total_slots"] == 5
+    assert data["affected_count"] == 3
+    assert data["unaffected_count"] == 2
+
+    affected_types = {item["type"] for item in data["affected_slots"]}
+    unaffected_types = {item["type"] for item in data["unaffected_slots"]}
+
+    # Rule Verification:
+    # Practice items and quiz items MUST be affected
+    assert "practice_foundation" in affected_types
+    assert "practice_advanced" in affected_types
+    assert "quiz_item" in affected_types
+
+    # Revision summary and conceptual explanation MUST be unaffected
+    assert "revision" in unaffected_types
+    assert "explanation" in unaffected_types
+
+    # Ensure each item has a descriptive name and non-empty reason string
+    for item in data["affected_slots"]:
+        assert len(item["name"]) > 0
+        assert len(item["reason"]) > 0
+        assert "difficulty" in item["reason"].lower()
+
+    for item in data["unaffected_slots"]:
+        assert len(item["name"]) > 0
+        assert len(item["reason"]) > 0
+
+
