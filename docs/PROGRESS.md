@@ -8,7 +8,7 @@
   - `engine/` (`model.py`, `planner.py`, `generator.py`, `verifier.py`, `solver.py`, `guardrails.py`, `impact.py`, `injection.py`, `bloom.py`)
   - `db/` (`database.py`, `models.py`, `seed.py`)
   - `eval/`, `tests/`, `data/`, `docs/`, `web/`, `scripts/`
-  - `.gitignore`, `requirements.txt`, `.env.example`, `README.md`, `docs/PROGRESS.md`
+  - `.gitignore`, `requirements.txt`, `.env.example`, `README.md`, `docs/PROGRESS.md`, `docs/HEALTH_SCORE.md`
 - [x] **STEP C**: Implemented:
   - [`db/models.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/db/models.py) (SQLAlchemy 2.0 with all 16 tables and constraints)
   - [`db/database.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/db/database.py) (SQLite Foreign Key PRAGMA and session generator)
@@ -57,9 +57,29 @@
   - Extracted and verified claims post-generation, recording `Claim` rows, storing full provenance in `AssetVersion`, setting `status="draft"` or `"needs_revision"` on unverified quotes, and `"generation_failed"` on model errors without corrupting other assets.
   - Implemented resume generation capability.
   - Implemented `GET /api/units/{id}/pack` returning structured learning packs grouped by objective with verification ratios and quality flags.
-- [x] **TASK 4 - Verification, Tests & Demo Pipeline**:
-  - Created [`tests/test_verifier.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_verifier.py) (exact, normalized, fuzzy, fabricated quote rejection, multi-chunk resolution).
-  - Created [`tests/test_planner.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_planner.py) (gap detection, refusal of unsupported objectives, blueprint generation).
-  - Created [`tests/test_generator.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_generator.py) (provenance persistence, claim tracking, failure isolation, resume capability).
-  - Created [`data/samples/photosynthesis.txt`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/data/samples/photosynthesis.txt) and [`scripts/demo_generate.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/demo_generate.py).
-  - Pytest test suite: **25 passed, 1 skipped in 4.92s**.
+
+---
+
+### Phase 3: Independent Solver, Guardrails, Approval Gate, Impact Engine & Publishing
+- [x] **TASK 1 - Independent Solver**:
+  - Implemented [`engine/solver.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/solver.py) that solves questions blinded to answer keys, rationales, and original quotes using ONLY source text.
+  - Quote verification of solver's supporting evidence and comparison to answer key; flags `answer_key_mismatch` (severity: error). Documented model family limitation.
+- [x] **TASK 2 - Guardrails Engine & Pack Health Diagnostics**:
+  - Implemented [`engine/guardrails.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/guardrails.py) with 10 deterministic & semantic quality checks: duplicate questions (Jaccard + RapidFuzz), answer leakage, unsupported claims, objective coverage imbalance, missing coverage, malformed keys, difficulty mismatch, unsupported revision terms, terminology drift, and injection-flagged sources.
+  - Created [`docs/HEALTH_SCORE.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/docs/HEALTH_SCORE.md) defining the composite 0-100 Pack Health score formula.
+  - Implemented `GET /api/units/{id}/health` returning full pack health diagnostics. Automated execution after generation and regeneration.
+- [x] **TASK 3 - Approval Gate, Versioning & Simplification**:
+  - Implemented `POST /api/assets/{id}/status` in [`api/routes_assets.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/api/routes_assets.py): blocking approval (HTTP 409) if error flags or unverified claims exist, requiring explicit `override=True` with logged reasons in `DecisionLog`, and locking approved assets (`locked=True`).
+  - Implemented `POST /api/assets/{id}/regenerate`: refusing on locked/approved assets, creating new `AssetVersion` records with `parent_version_id`, recording `Feedback`, and preserving other assets.
+  - Implemented `GET /api/assets/{id}/versions` with provenance and field-level diffs.
+  - Implemented `POST /api/assets/{id}/simplify` for lower reading-level variant generation with glossary term and quote preservation.
+- [x] **TASK 5 - Change Impact Engine**:
+  - Implemented [`engine/impact.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/impact.py) and endpoints `GET /api/units/{id}/impact` and `POST /api/units/{id}/regenerate-affected`. Safely regenerates affected unapproved assets and preserves approved assets as stale items.
+- [x] **TASK 6 - Publish & Export & Student Boundary**:
+  - Implemented `POST /api/units/{id}/publish` snapshotting approved asset versions to `Publication`.
+  - Implemented `GET /api/units/{id}/export` returning clean JSON and standalone print-friendly HTML.
+  - Implemented [`api/routes_student.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/api/routes_student.py) enforcing approved-only visibility, stripping answer keys before submission, and grading attempts post-submission.
+- [x] **TASK 7 - Advanced Feature Tests & Demo**:
+  - Created [`tests/test_advanced_features.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_advanced_features.py) with 6 comprehensive end-to-end unit tests.
+  - Updated [`scripts/demo_generate.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/demo_generate.py) running full pipeline from ingestion to publication, grading, and impact analysis.
+  - Total Pytest suite: **31 passed, 1 skipped in 5.04s**.

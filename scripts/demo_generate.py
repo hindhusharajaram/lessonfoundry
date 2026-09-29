@@ -15,13 +15,81 @@ from engine.generator import (
     QuizItemContent,
     RevisionContent,
 )
-from engine.planner import ObjectiveSupportEvaluation
+from engine.solver import SolverAnswer
 
 client = TestClient(app)
 
+_Q_COUNTER = 0
+
+SAMPLE_QUESTIONS = [
+    {
+        "question": "Where do the light-dependent reactions of photosynthesis take place?",
+        "options": ["Across the thylakoid membrane", "In the outer membrane", "Inside the nucleus", "In the vacuole"],
+        "correct_index": 0,
+        "rationale": "The light-dependent reactions occur across the thylakoid membrane.",
+        "quote": "The light-dependent reactions occur across the thylakoid membrane.",
+        "bloom": "Remember",
+    },
+    {
+        "question": "What process replaces the electrons lost by chlorophyll in Photosystem II?",
+        "options": ["Oxidative phosphorylation", "Photolysis of water", "Fermentation", "Citric acid cycle"],
+        "correct_index": 1,
+        "rationale": "Water molecules undergo photolysis, splitting into protons, electrons, and oxygen.",
+        "quote": "water molecules undergo photolysis, splitting into protons, electrons, and diatomic oxygen gas.",
+        "bloom": "Understand",
+    },
+    {
+        "question": "Which enzyme catalyzes carbon fixation during the Calvin cycle in the stroma?",
+        "options": ["ATP Synthase", "RuBisCO", "DNA Polymerase", "Amylase"],
+        "correct_index": 1,
+        "rationale": "RuBisCO attaches CO2 to RuBP in the chloroplast stroma.",
+        "quote": "The key enzyme catalyzing the initial carbon fixation step is ribulose-1,5-bisphosphate carboxylase-oxygenase, commonly known as RuBisCO.",
+        "bloom": "Apply",
+    },
+    {
+        "question": "What molecule is produced when 3-PGA is reduced using ATP and NADPH in the Calvin cycle?",
+        "options": ["Glyceraldehyde-3-phosphate (G3P)", "Pyruvate", "Lactic acid", "Acetyl-CoA"],
+        "correct_index": 0,
+        "rationale": "3-PGA is reduced to form glyceraldehyde-3-phosphate (G3P).",
+        "quote": "Through subsequent reduction steps powered by ATP and NADPH, 3-PGA is converted into glyceraldehyde-3-phosphate (G3P).",
+        "bloom": "Understand",
+    },
+    {
+        "question": "What drives ATP synthase to generate ATP across the thylakoid membrane?",
+        "options": ["Electrochemical proton gradient", "Sodium potassium pump", "Direct sunlight pressure", "Mechanical vibration"],
+        "correct_index": 0,
+        "rationale": "Proton motive force across the thylakoid membrane drives ATP synthase.",
+        "quote": "This proton motive force drives ATP synthase to generate adenosine triphosphate (ATP)",
+        "bloom": "Analyze",
+    },
+    {
+        "question": "How many molecules of fixed carbon dioxide yield one net molecule of G3P exiting the cycle?",
+        "options": ["Six molecules", "Three molecules", "One molecule", "Twelve molecules"],
+        "correct_index": 1,
+        "rationale": "For every three molecules of CO2 fixed, one net molecule of G3P exits the cycle.",
+        "quote": "For every three molecules of CO2 fixed, one net molecule of G3P exits the cycle to form glucose and other organic compounds",
+        "bloom": "Analyze",
+    },
+    {
+        "question": "What are the fluid-filled spaces surrounding the thylakoids called?",
+        "options": ["Cytosol", "Stroma", "Matrix", "Lumen"],
+        "correct_index": 1,
+        "rationale": "The fluid-filled space surrounding the thylakoids is called the stroma.",
+        "quote": "The fluid-filled space surrounding the thylakoids is called the stroma.",
+        "bloom": "Remember",
+    },
+    {
+        "question": "Which wavelength colors are primarily absorbed by chlorophyll pigments?",
+        "options": ["Green and yellow", "Blue and red", "Infrared and ultraviolet", "Only orange"],
+        "correct_index": 1,
+        "rationale": "Chlorophyll absorbs blue and red wavelengths while reflecting green.",
+        "quote": "The thylakoid membranes contain chlorophyll, the primary green pigment responsible for absorbing blue and red wavelengths of light while reflecting green light.",
+        "bloom": "Understand",
+    },
+]
+
 
 def get_mock_planner_eval(obj, chunks, db_sess):
-    """Mock planner evaluation for offline demo execution."""
     text_lower = obj.text.lower()
     if "mendelian" in text_lower or "dihybrid" in text_lower:
         obj.supported = False
@@ -40,9 +108,9 @@ def get_mock_planner_eval(obj, chunks, db_sess):
 
 
 def get_mock_generator(prompt, schema, **kwargs):
-    """Provide realistic, evidence-locked responses matching photosynthesis source text."""
+    global _Q_COUNTER
     schema_name = schema.__name__
-    meta = {"model": "gemini-2.5-flash", "latency_ms": 320, "attempts": 1, "prompt_version": "1.0"}
+    meta = {"model": "gemini-2.5-flash", "latency_ms": 250, "attempts": 1, "prompt_version": "1.0"}
 
     if schema_name == "ExplanationContent":
         obj = ExplanationContent(
@@ -73,6 +141,16 @@ def get_mock_generator(prompt, schema, **kwargs):
                     "definition": "Light-driven splitting of water molecules into protons, electrons, and oxygen.",
                     "quote": "water molecules undergo photolysis, splitting into protons, electrons, and diatomic oxygen gas.",
                 },
+                {
+                    "term": "Stroma",
+                    "definition": "The fluid-filled space surrounding the thylakoids in chloroplasts.",
+                    "quote": "The fluid-filled space surrounding the thylakoids is called the stroma.",
+                },
+                {
+                    "term": "RuBisCO",
+                    "definition": "Key enzyme catalyzing the initial carbon fixation step.",
+                    "quote": "The key enzyme catalyzing the initial carbon fixation step is ribulose-1,5-bisphosphate carboxylase-oxygenase, commonly known as RuBisCO.",
+                },
             ],
         )
         return obj, meta
@@ -95,19 +173,17 @@ def get_mock_generator(prompt, schema, **kwargs):
         return obj, meta
 
     elif schema_name == "QuizItemContent":
+        q_data = SAMPLE_QUESTIONS[_Q_COUNTER % len(SAMPLE_QUESTIONS)]
+        _Q_COUNTER += 1
+        diff = "easy" if "foundation" in prompt else ("advanced" if "advanced" in prompt else "medium")
         obj = QuizItemContent(
-            question="Which enzyme catalyzes the initial carbon fixation step in the Calvin cycle?",
-            options=[
-                "ATP Synthase",
-                "RuBisCO",
-                "Ferredoxin-NADP+ Reductase",
-                "Chlorophyllase",
-            ],
-            correct_index=1,
-            rationale="RuBisCO (ribulose-1,5-bisphosphate carboxylase-oxygenase) attaches carbon dioxide to RuBP in the chloroplast stroma.",
-            quote="The key enzyme catalyzing the initial carbon fixation step is ribulose-1,5-bisphosphate carboxylase-oxygenase, commonly known as RuBisCO.",
-            bloom="Remember",
-            difficulty="medium",
+            question=q_data["question"],
+            options=q_data["options"],
+            correct_index=q_data["correct_index"],
+            rationale=q_data["rationale"],
+            quote=q_data["quote"],
+            bloom=q_data["bloom"],
+            difficulty=diff,
         )
         return obj, meta
 
@@ -128,10 +204,28 @@ def get_mock_generator(prompt, schema, **kwargs):
             terms=[
                 {
                     "term": "RuBisCO",
-                    "definition": "Enzyme responsible for initial carbon fixation in the stroma.",
+                    "definition": "Key enzyme catalyzing the initial carbon fixation step.",
                     "quote": "The key enzyme catalyzing the initial carbon fixation step is ribulose-1,5-bisphosphate carboxylase-oxygenase, commonly known as RuBisCO.",
                 }
             ],
+        )
+        return obj, meta
+
+    elif schema_name == "SolverAnswer":
+        # Extract correct answer from options in prompt
+        # In mock solver, match the question's supporting quote and correct choice
+        chosen = 0
+        supporting = "The light-dependent reactions occur across the thylakoid membrane."
+        for q in SAMPLE_QUESTIONS:
+            if q["question"] in prompt:
+                chosen = q["correct_index"]
+                supporting = q["quote"]
+                break
+
+        obj = SolverAnswer(
+            chosen_index=chosen,
+            supporting_quote=supporting,
+            rationale="Verified directly from source reference text.",
         )
         return obj, meta
 
@@ -139,16 +233,12 @@ def get_mock_generator(prompt, schema, **kwargs):
 
 
 def run_demo():
-    print("=" * 70)
-    print("LessonFoundry End-to-End Pipeline Demo")
-    print("=" * 70)
+    print("=" * 75)
+    print("LessonFoundry End-to-End Pipeline & Pack Health Demo")
+    print("=" * 75)
 
-    # 1. Load sample source file
+    # 1. Ingest Sample Source
     sample_path = Path(__file__).resolve().parent.parent / "data" / "samples" / "photosynthesis.txt"
-    if not sample_path.exists():
-        print(f"Error: Sample source file not found at {sample_path}")
-        return
-
     sample_text = sample_path.read_text(encoding="utf-8")
     print(f"\n1. Ingesting Source Document ({len(sample_text)} characters)...")
 
@@ -157,14 +247,11 @@ def run_demo():
         data={"title": "Photosynthesis & Calvin Cycle", "text": sample_text},
         headers={"X-Role": "teacher"},
     )
-    if upload_resp.status_code != 201:
-        print(f"Upload failed: {upload_resp.text}")
-        return
-
+    assert upload_resp.status_code == 201
     upload_data = upload_resp.json()
     source_id = upload_data["source_id"]
     print(f"   -> Source ID: {source_id} (Version {upload_data['version_no']}, {upload_data['chunks_count']} Chunks)")
-    print(f"   -> Injection Flags: {upload_data['injection_flags']['count']} detected (flagged={upload_data['injection_flags']['flagged']})")
+    print(f"   -> Injection Flags: {upload_data['injection_flags']['count']} found (flagged={upload_data['injection_flags']['flagged']})")
 
     # 2. Create Unit
     print("\n2. Creating Lesson Unit...")
@@ -177,16 +264,12 @@ def run_demo():
             "difficulty": "medium",
             "language": "English",
             "quiz_count": 4,
-            "constraints": {"max_words": 150},
         },
         headers={"X-Role": "teacher"},
     )
-    if unit_resp.status_code != 201:
-        print(f"Unit creation failed: {unit_resp.text}")
-        return
-
+    assert unit_resp.status_code == 201
     unit_id = unit_resp.json()["unit_id"]
-    print(f"   -> Created Unit ID: {unit_id} (Pinned Source Version: {unit_resp.json()['pinned_source_version_id']})")
+    print(f"   -> Created Unit ID: {unit_id}")
 
     # 3. Set Objectives (2 supported, 1 intentionally unsupported)
     print("\n3. Setting Unit Objectives (including 1 intentionally unsupported objective)...")
@@ -205,14 +288,8 @@ def run_demo():
         },
     ]
 
-    obj_resp = client.put(
-        f"/api/units/{unit_id}/objectives",
-        json=objectives_payload,
-        headers={"X-Role": "teacher"},
-    )
-    if obj_resp.status_code != 200:
-        print(f"Setting objectives failed: {obj_resp.text}")
-        return
+    obj_resp = client.put(f"/api/units/{unit_id}/objectives", json=objectives_payload, headers={"X-Role": "teacher"})
+    assert obj_resp.status_code == 200
     print(f"   -> {obj_resp.json()['objectives_count']} objectives registered.")
 
     # 4. Plan Unit with Gap Detection
@@ -226,83 +303,109 @@ def run_demo():
     else:
         plan_resp = client.post(f"/api/units/{unit_id}/plan", headers={"X-Role": "teacher"})
 
-    if plan_resp.status_code != 200:
-        print(f"Plan failed: {plan_resp.text}")
-        return
-
+    assert plan_resp.status_code == 200
     plan_data = plan_resp.json()
     print(f"   -> Supported Objectives: {plan_data['supported_objectives_count']}")
     print(f"   -> Refused / Unsupported Objectives: {plan_data['unsupported_objectives_count']}")
     for unsup in plan_data.get("unsupported_details", []):
         print(f"      * Refused Objective #{unsup['id']}: \"{unsup['text']}\"")
         print(f"        Reason: {unsup['reason']}")
-    print(f"   -> Generated Blueprint Slots: {plan_data['slots_count']} slots (0 slots for unsupported objective)")
+    print(f"   -> Blueprint Slots: {plan_data['slots_count']} slots created (0 slots for unsupported objective)")
 
     # 5. Generate Learning Pack Content
     print("\n5. Generating Evidence-Locked Learning Pack (POST /api/units/{id}/generate)...")
     if not has_live_key:
-        with patch("engine.generator.generate_json", side_effect=get_mock_generator):
+        with patch("engine.generator.generate_json", side_effect=get_mock_generator), patch("engine.solver.generate_json", side_effect=get_mock_generator):
             gen_resp = client.post(f"/api/units/{unit_id}/generate", headers={"X-Role": "teacher"})
     else:
         gen_resp = client.post(f"/api/units/{unit_id}/generate", headers={"X-Role": "teacher"})
 
-    if gen_resp.status_code != 200:
-        print(f"Generation failed: {gen_resp.text}")
-        return
-
+    assert gen_resp.status_code == 200
     gen_data = gen_resp.json()
-    print(f"   -> Total Slots: {gen_data['total_slots']}")
-    print(f"   -> Successfully Generated: {gen_data['generated_count']}")
-    print(f"   -> Skipped (Resumed): {gen_data['skipped_count']}")
-    print(f"   -> Failed: {gen_data['failed_count']}")
+    print(f"   -> Total Slots: {gen_data['total_slots']} | Successfully Generated: {gen_data['generated_count']}")
 
-    # 6. Fetch Full Pack & Quality Metrics
-    print("\n6. Fetching Complete Learning Pack (GET /api/units/{id}/pack)...")
-    pack_resp = client.get(
-        f"/api/units/{unit_id}/pack",
+    # 6. Run Independent Solver & Guardrails Pack Health Check
+    print("\n6. Running Guardrails & Independent Solver Pack Health Check (GET /api/units/{id}/health)...")
+    health_resp = client.get(f"/api/units/{unit_id}/health", headers={"X-Role": "teacher"})
+    assert health_resp.status_code == 200
+    health_data = health_resp.json()
+
+    print("\n" + "=" * 75)
+    print(f"PACK HEALTH DIAGNOSTIC REPORT: {health_data['title']}")
+    print("=" * 75)
+    print(f"Composite Health Score: {health_data['health_score']} / 100")
+    print(f"Grounding Ratio: {health_data['grounding_percentage']}% ({health_data['verified_claims']}/{health_data['total_claims']} claims verified)")
+    print(f"Solver Verification Rate: {health_data['solver_verification_rate']}% ({health_data['solver_matched_slots']}/{health_data['total_quiz_slots']} questions dual-verified)")
+    print(f"Duplicate Questions: {health_data['duplicate_count']}")
+    print(f"Open Quality Flags: {health_data['open_flags_count']['total']} (Error: {health_data['open_flags_count']['error']}, Warning: {health_data['open_flags_count']['warning']}, Info: {health_data['open_flags_count']['info']})")
+
+    # 7. Approve Assets via Teacher Studio
+    print("\n7. Teacher Review & Quality Gate Approval...")
+    pack_resp = client.get(f"/api/units/{unit_id}/pack", headers={"X-Role": "teacher"})
+    pack_data = pack_resp.json()
+
+    approved_count = 0
+    for obj in pack_data["objectives"]:
+        for slot in obj["slots"]:
+            asset_info = slot.get("asset")
+            if asset_info and asset_info.get("asset_id"):
+                app_res = client.post(
+                    f"/api/assets/{asset_info['asset_id']}/status",
+                    json={"status": "approved", "note": "Approved during demo review"},
+                    headers={"X-Role": "teacher"},
+                )
+                if app_res.status_code == 200:
+                    approved_count += 1
+
+    print(f"   -> Approved {approved_count} assets (locked=True).")
+
+    # 8. Publish Unit & Student Attempt
+    print("\n8. Publishing Learning Pack to Class (POST /api/units/{id}/publish)...")
+    pub_res = client.post(
+        f"/api/units/{unit_id}/publish",
+        json={"class_label": "Biology Period 3"},
         headers={"X-Role": "teacher"},
     )
-    if pack_resp.status_code != 200:
-        print(f"Pack retrieval failed: {pack_resp.text}")
-        return
+    assert pub_res.status_code == 200
+    pub_data = pub_res.json()
+    print(f"   -> Unit published! Publication ID: {pub_data['publication_id']} | Approved Snapshot Items: {pub_data['approved_assets_count']}")
 
-    pack_data = pack_resp.json()
-    print("\n" + "=" * 70)
-    print(f"LEARNING PACK REPORT: {pack_data['title']}")
-    print("=" * 70)
-    print(f"Overall Claim Verification Rate: {pack_data['overall_verification_ratio'] * 100:.1f}% ({pack_data['verified_claims']}/{pack_data['total_claims']} verified claims)")
-    print(f"Quality Flags: {len(pack_data['quality_flags'])}")
-    for qf in pack_data["quality_flags"]:
-        print(f"  - [{qf['severity'].upper()}] {qf['code']}: {qf['message']}")
+    print("\n9. Student Simulation: Taking Quiz via /api/student/units/{id}...")
+    stud_view = client.get(f"/api/student/units/{unit_id}", headers={"X-Role": "student", "X-Student-Id": "101"})
+    assert stud_view.status_code == 200
+    stud_slots = stud_view.json()["slots"]
+    print(f"   -> Student sees {len(stud_slots)} approved assets (Answer keys and rationale are stripped).")
 
-    print("\nObjectives & Generated Slots:")
-    for obj in pack_data["objectives"]:
-        status_str = "SUPPORTED" if obj["supported"] else "UNSUPPORTED (REFUSED)"
-        print(f"\n[Objective {obj['position']}] {obj['text']}")
-        print(f"Status: {status_str} | Target Bloom: {obj['bloom_target']}")
-        if not obj["supported"]:
-            print(f"Support Note: {obj['support_note']}")
-            print("Slots: None (evidence boundary maintained, no orphans created)")
-        else:
-            print(f"Generated Slots ({len(obj['slots'])} total):")
-            for slot in obj["slots"]:
-                asset = slot.get("asset")
-                v_no = asset["version_no"] if asset else "None"
-                a_status = asset["status"] if asset else "None"
-                v_ratio = asset.get("verification", {}).get("verification_ratio", 0.0) if asset else 0.0
-                print(f"  - Slot #{slot['position']} [{slot['type']}] (Bloom: {slot['bloom_tag']}, Diff: {slot['difficulty']}) | Asset: {a_status} (v{v_no}, ver={v_ratio*100:.0f}%)")
-                if asset and asset.get("content"):
-                    c = asset["content"]
-                    if slot["type"] == "explanation":
-                        print(f"    Title: {c.get('title')}")
-                        print(f"    Sentences: {len(c.get('sentences', []))} | Glossary: {len(c.get('glossary', []))}")
-                    elif slot["type"] == "quiz_item":
-                        print(f"    Question: {c.get('question')}")
-                        print(f"    Options: {c.get('options')} (Correct: #{c.get('correct_index')})")
+    # Submit answers
+    quiz_slots = [s for s in stud_slots if s["type"] in ["quiz_item", "practice_foundation", "practice_advanced"]]
+    if quiz_slots:
+        answers_payload = [
+            {"asset_id": s["asset_id"], "chosen_index": 1, "time_seconds": 12}
+            for s in quiz_slots
+        ]
+        attempt_res = client.post(
+            "/api/student/attempts",
+            json={"unit_id": unit_id, "answers": answers_payload},
+            headers={"X-Role": "student", "X-Student-Id": "101"},
+        )
+        assert attempt_res.status_code == 201
+        attempt_data = attempt_res.json()
+        print(f"   -> Student Submission Recorded. Score: {attempt_data['score']}%.")
 
-    print("\n" + "=" * 70)
-    print("Demo Execution Completed Successfully.")
-    print("=" * 70)
+    # 10. Impact Engine Analysis
+    print("\n10. Testing Change Impact Engine (GET /api/units/{id}/impact?change=difficulty:medium->advanced)...")
+    impact_res = client.get(
+        f"/api/units/{unit_id}/impact?change=difficulty:medium->advanced",
+        headers={"X-Role": "teacher"},
+    )
+    assert impact_res.status_code == 200
+    impact_data = impact_res.json()
+    print(f"   -> Impact Analysis: {impact_data['affected_count']} affected slots, {impact_data['unaffected_count']} unaffected slots.")
+    print(f"   -> Approved-but-stale items safely preserved: {impact_data['approved_stale_count']}")
+
+    print("\n" + "=" * 75)
+    print("Full LessonFoundry Studio Pipeline Verified Successfully.")
+    print("=" * 75)
 
 
 if __name__ == "__main__":

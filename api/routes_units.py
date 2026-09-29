@@ -417,3 +417,251 @@ def get_unit_pack(
         "quality_flags": quality_flags,
         "objectives": list(objectives_map.values()),
     }
+
+
+@router.get("/{unit_id}/health")
+def get_unit_health(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """
+    Returns the composite Pack Health object (0-100 score, grounding %, solver rate,
+    Bloom distribution, objective coverage, and open flags).
+    """
+    try:
+        from engine.guardrails import calculate_pack_health
+        health_data = calculate_pack_health(unit_id, db)
+        return health_data
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(ve),
+        )
+
+
+@router.get("/{unit_id}/impact")
+def get_unit_impact(
+    unit_id: int,
+    change: str = "difficulty:medium->advanced",
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """
+    Analyze the downstream impact of a change descriptor (e.g. difficulty, grade, objective edit, or source version update).
+    """
+    try:
+        from engine.impact import analyze_change_impact
+        impact_data = analyze_change_impact(unit_id, change, db)
+        return impact_data
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(ve),
+        )
+
+
+@router.post("/{unit_id}/regenerate-affected")
+def regenerate_affected(
+    unit_id: int,
+    change: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """
+    Regenerates only affected, non-approved assets. Approved assets are preserved and flagged as stale for review.
+    """
+    try:
+        from engine.impact import regenerate_affected_assets
+        res = regenerate_affected_assets(unit_id, change, db)
+        return res
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(ve),
+        )
+
+
+class UnitPublishRequest(BaseModel):
+    class_label: str = "All"
+
+
+@router.post("/{unit_id}/publish")
+def publish_unit(
+    unit_id: int,
+    req: UnitPublishRequest = Body(default=UnitPublishRequest()),
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """
+    Publish learning pack:
+    - Requires at least 1 approved asset.
+    - Snapshots only approved current versions.
+    """
+    from db.models import Publication
+    unit = db.query(Unit).filter(Unit.id == unit_id).first()
+    if not unit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unit {unit_id} not found.",
+        )
+
+    slots = db.query(Slot).filter(Slot.unit_id == unit_id).all()
+    approved_assets = []
+    for s in slots:
+        if s.asset and s.asset.status == "approved" and s.asset.current_version:
+            approved_assets.append({
+                "slot_id": s.id,
+                "asset_id": s.asset.id,
+                "version_id": s.asset.current_version.id,
+                "type": s.type,
+                "position": s.position,
+                "bloom_tag": s.bloom_tag,
+                "difficulty": s.difficulty,
+                "content": s.asset.current_version.content,
+            })
+
+    if not approved_assets:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot publish unit: no approved assets found. Teachers must review and approve assets before publishing.",
+        )
+
+    snapshot_data = {
+        "unit_id": unit.id,
+        "title": unit.title,
+        "class_label": req.class_label,
+        "target_grade": unit.target_grade,
+        "difficulty": unit.difficulty,
+        "approved_assets_count": len(approved_assets),
+        "assets": approved_assets,
+    }
+
+    publication = Publication(
+        unit_id=unit.id,
+        class_label=req.class_label,
+        snapshot=snapshot_data,
+    )
+    db.add(publication)
+    unit.status = "published"
+    db.commit()
+    db.refresh(publication)
+
+    return {
+        "publication_id": publication.id,
+        "unit_id": unit.id,
+        "class_label": publication.class_label,
+        "published_at": publication.published_at.isoformat(),
+        "approved_assets_count": len(approved_assets),
+        "status": "published",
+        "message": f"Unit published successfully to class '{req.class_label}'.",
+    }
+
+
+@router.get("/{unit_id}/export")
+def export_unit(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_teacher),
+):
+    """
+    Export clean structured bundle (JSON and standalone print-friendly HTML) containing ONLY approved content.
+    """
+    unit = db.query(Unit).filter(Unit.id == unit_id).first()
+    if not unit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unit {unit_id} not found.",
+        )
+
+    slots = db.query(Slot).filter(Slot.unit_id == unit_id).order_by(Slot.position).all()
+    approved_items = []
+    for s in slots:
+        if s.asset and s.asset.status == "approved" and s.asset.current_version:
+            approved_items.append({
+                "slot_id": s.id,
+                "type": s.type,
+                "position": s.position,
+                "bloom_tag": s.bloom_tag,
+                "difficulty": s.difficulty,
+                "content": s.asset.current_version.content,
+            })
+
+    # Generate print-friendly HTML string
+    html_cards = []
+    for item in approved_items:
+        t = item["type"]
+        c = item["content"]
+        if t == "explanation":
+            sents = "".join([f"<li>{s.get('text')}</li>" for s in c.get("sentences", [])])
+            terms = "".join([f"<li><strong>{g.get('term')}</strong>: {g.get('definition')}</li>" for g in c.get("glossary", [])])
+            html_cards.append(f"""
+            <div class="card">
+                <h3>📖 {c.get('title', 'Explanation')}</h3>
+                <p><em>{c.get('summary', '')}</em></p>
+                <ul>{sents}</ul>
+                <h4>Key Vocabulary</h4>
+                <ul>{terms}</ul>
+            </div>
+            """)
+        elif t == "example":
+            steps = "".join([f"<li>{st.get('text')}</li>" for st in c.get("steps", [])])
+            html_cards.append(f"""
+            <div class="card">
+                <h3>💡 Worked Example: {c.get('problem', '')}</h3>
+                <ol>{steps}</ol>
+                <p><strong>Conclusion:</strong> {c.get('answer', '')}</p>
+            </div>
+            """)
+        elif t in ["quiz_item", "practice_foundation", "practice_advanced"]:
+            opts = "".join([f"<li>{opt}</li>" for opt in c.get("options", [])])
+            html_cards.append(f"""
+            <div class="card">
+                <h3>❓ Question: {c.get('question', '')}</h3>
+                <ol type="A">{opts}</ol>
+                <p class="meta">Bloom Level: {c.get('bloom', '')} | Difficulty: {c.get('difficulty', '')}</p>
+            </div>
+            """)
+        elif t == "revision":
+            kps = "".join([f"<li>{kp.get('text')}</li>" for kp in c.get("key_points", [])])
+            html_cards.append(f"""
+            <div class="card">
+                <h3>📝 Revision Summary</h3>
+                <ul>{kps}</ul>
+            </div>
+            """)
+
+    html_document = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{unit.title} - LessonFoundry Learning Pack</title>
+    <style>
+        body {{ font-family: Inter, -apple-system, sans-serif; background: #F5F7FB; color: #1E293B; margin: 40px; }}
+        .header {{ background: #0B1437; color: white; padding: 24px; border-radius: 14px; margin-bottom: 24px; }}
+        .card {{ background: white; border: 1px solid #E5E9F2; border-radius: 14px; padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+        h3 {{ color: #4F46E5; margin-top: 0; }}
+        .meta {{ color: #64748B; font-size: 0.9em; }}
+        @media print {{ body {{ margin: 0; background: white; }} .card {{ page-break-inside: avoid; border: 1px solid #ccc; }} }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{unit.title}</h1>
+        <p>Target Grade: {unit.target_grade} | Language: {unit.language} | Approved Items: {len(approved_items)}</p>
+    </div>
+    {''.join(html_cards)}
+</body>
+</html>
+"""
+
+    return {
+        "unit_id": unit.id,
+        "title": unit.title,
+        "target_grade": unit.target_grade,
+        "difficulty": unit.difficulty,
+        "approved_items_count": len(approved_items),
+        "items": approved_items,
+        "html_export": html_document,
+    }
+

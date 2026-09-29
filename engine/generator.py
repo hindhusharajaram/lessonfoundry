@@ -316,11 +316,16 @@ def generate_slot(
             message=f"Asset has {total_claims - verified_claims_count} unverified quote(s).",
         )
         db.add(flag)
-    else:
         asset.status = "draft"
 
     db.commit()
     db.refresh(asset_version)
+
+    # Run independent solver on assessment items
+    if slot.type in ["quiz_item", "practice_foundation", "practice_advanced"]:
+        from engine.solver import verify_asset_with_solver
+        verify_asset_with_solver(slot, asset_version, db)
+
     return asset_version
 
 
@@ -393,6 +398,10 @@ def generate_unit_pack(unit_id: int, db: Session) -> Dict[str, Any]:
 
     unit.status = "generated"
     db.commit()
+
+    # Automatically execute guardrails across the unit
+    from engine.guardrails import run_unit_guardrails
+    run_unit_guardrails(unit.id, db)
 
     return {
         "unit_id": unit.id,
