@@ -192,10 +192,18 @@ export const UnitPackPage: React.FC = () => {
     if (!activeItem?.asset) return;
     try {
       setIsRegenerating(true);
+      // If asset is locked or approved, automatically transition to needs_revision with teacher note
+      if (activeItem.asset.status === 'approved' || activeItem.asset.locked) {
+        await api.updateAssetStatus(activeItem.asset.id, {
+          status: 'needs_revision',
+          actor: 'Teacher Admin',
+          note: regenFeedback || 'Reverted to needs_revision for feedback regeneration',
+        });
+      }
       await api.regenerateAsset(activeItem.asset.id, regenFeedback || undefined);
       setRegenerateModalOpen(false);
       setRegenFeedback('');
-      loadPackData();
+      await loadPackData();
     } catch (err: any) {
       alert(err.message || 'Regeneration failed');
     } finally {
@@ -883,30 +891,15 @@ export const UnitPackPage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {activeItem.asset.status !== 'needs_revision' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSetNeedsRevision(activeItem.asset!.id)}
-                          className="border-amber-300 text-amber-800 hover:bg-amber-50"
-                        >
-                          Mark Needs Revision
-                        </Button>
-                      )}
-
                       <Button
                         size="sm"
                         variant="secondary"
                         onClick={() => {
-                          if (activeItem.asset?.locked) {
-                            alert('Asset is locked because it is approved. Please set "Needs Revision" first before regenerating.');
-                            return;
-                          }
                           setRegenerateModalOpen(true);
                         }}
                         leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
                       >
-                        Regenerate
+                        {activeItem.asset.status === 'approved' ? 'Revise & Regenerate' : 'Regenerate with Feedback'}
                       </Button>
 
                       <Button

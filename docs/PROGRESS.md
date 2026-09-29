@@ -238,6 +238,39 @@
     - Confirmed live against SQLite database for Unit #1 (`GET /api/units/1/pack`), retrieving real verified claim quotes and chunk IDs (e.g., Chunk #3, Chunk #4).
     - Production build: `npm run build` (`tsc -b && vite build`) passed cleanly with **0 errors**.
 
+---
+
+## Teacher Revision Feedback & Immutable Regeneration Loop
+
+### 1. Loop Architecture & Verification
+
+The complete teacher feedback revision and immutable regeneration loop was tested and confirmed end-to-end:
+
+1. **Teacher Feedback Input in UI**:
+   - In [`web/src/pages/teacher/UnitPackPage.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/pages/teacher/UnitPackPage.tsx), the teacher can click `"Revise & Regenerate"` or `"Regenerate with Feedback"` to open the Revision Modal with a dedicated multiline feedback input (`regenFeedback`).
+   - If the asset is currently `approved` or `locked`, `handleRegenerate()` seamlessly transitions the asset to `status: "needs_revision"` with the teacher's note before triggering regeneration.
+2. **API Endpoint & Feedback Logging**:
+   - The UI sends `POST /api/assets/{id}/regenerate` with `{"feedback": "..."}`.
+   - [`api/routes_assets.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/api/routes_assets.py) records a persistent [`Feedback`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/db/models.py) entity linked to the asset and invokes `generate_slot(..., feedback=req.feedback, parent_version=parent_version)`.
+3. **Prompt Injection of Teacher Feedback Directive**:
+   - In [`engine/generator.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/generator.py), the prompt explicitly injects the teacher's directive:
+     ```
+     CRITICAL TEACHER REVISION FEEDBACK TO INCORPORATE:
+     The teacher reviewed the prior version and explicitly requested the following changes:
+     "<feedback_text>"
+     You MUST directly address this teacher feedback in your generation while maintaining strict evidence grounding.
+     ```
+4. **Immutable Version Lineage & Multi-Asset Isolation**:
+   - A new `AssetVersion` (e.g. `v2`) is created with `parent_version_id = 1` pointing to the previous version.
+   - All other approved assets in the unit remain **100% byte-identical, locked, and untouched**.
+   - `GET /api/assets/{id}/versions` returns the full version history tree with `version_no`, `model`, `parent_version_id`, and `created_at` timestamps.
+
+### 2. Live Verification Results
+- **Asset 1 (Regenerated)**: Transitioned from `v1 (approved, locked=True)` $\rightarrow$ `v2 (needs_revision, parent_id=1)`.
+- **Asset 2 (Other Unit Asset)**: Remained untouched at `v1 (approved, locked=True)` with zero mutation.
+- **Lineage Verification**: `GET /api/assets/1/versions` confirmed both `v1` and `v2` preserved in provenance chain.
+
+
 
 
 

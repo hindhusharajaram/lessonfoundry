@@ -182,7 +182,12 @@ def generate_slot(
     )
 
     if feedback:
-        base_instructions += f"\nTeacher Feedback to address in regeneration: {feedback}"
+        base_instructions += (
+            f"\n\nCRITICAL TEACHER REVISION FEEDBACK TO INCORPORATE:\n"
+            f"The teacher reviewed the prior version and explicitly requested the following changes:\n"
+            f"\"{feedback}\"\n"
+            f"You MUST directly address this teacher feedback in your generation while maintaining strict evidence grounding."
+        )
 
     schema_type: Type[BaseModel]
     if slot.type == "explanation":
