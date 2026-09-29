@@ -42,10 +42,10 @@ Write-Host "Frontend: http://localhost:5173" -ForegroundColor White
 Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
 
 # Start Backend in new window
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot'; & '$PythonExe' -m uvicorn api.main:app --reload --port 8000"
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", "cd '$ProjectRoot'; & '$PythonExe' -m uvicorn api.main:app --reload --port 8000"
 
 # Start Frontend in new window
 $WebDir = Join-Path $ProjectRoot "web"
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$WebDir'; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", "cd '$WebDir'; npm.cmd run dev"
 
 Write-Host "LessonFoundry is now running with a fresh database." -ForegroundColor Green

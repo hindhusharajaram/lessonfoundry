@@ -19,9 +19,10 @@ export const StudentLearningPage: React.FC = () => {
     try {
       setLoading(true);
       const data = await api.getStudentUnits();
-      setUnits(data);
+      setUnits(Array.isArray(data) ? data : (data as any)?.units || []);
     } catch (err) {
       console.error('Failed to load student units', err);
+      setUnits([]);
     } finally {
       setLoading(false);
     }

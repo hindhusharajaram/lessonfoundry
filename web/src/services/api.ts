@@ -120,7 +120,8 @@ export const api = {
   },
 
   async listUnits(): Promise<Unit[]> {
-    return request('/units');
+    const res: any = await request('/units');
+    return Array.isArray(res) ? res : res?.units || [];
   },
 
   async getUnit(unitId: number): Promise<Unit> {
@@ -312,7 +313,8 @@ export const api = {
 
   // Student Endpoints
   async getStudentUnits(): Promise<any[]> {
-    return request('/student/units');
+    const res: any = await request('/student/units');
+    return Array.isArray(res) ? res : res?.units || [];
   },
 
   async getStudentUnit(unitId: number): Promise<any> {

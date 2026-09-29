@@ -32,9 +32,10 @@ export const TeacherDashboardPage: React.FC = () => {
     try {
       setLoading(true);
       const data = await api.listUnits();
-      setUnits(data);
+      setUnits(Array.isArray(data) ? data : (data as any)?.units || []);
     } catch (err) {
       console.error('Failed to load units', err);
+      setUnits([]);
     } finally {
       setLoading(false);
     }
