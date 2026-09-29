@@ -1,33 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
 import {
   ShieldCheck,
   CheckCircle2,
   AlertTriangle,
   RotateCcw,
   Sparkles,
-  FileText,
-  HelpCircle,
-  BookOpen,
-  Send,
-  Download,
-  Share2,
-  Layers,
   History,
-  Check,
   Lock,
   Zap,
-  Info,
   ChevronRight,
   Eye,
-  FileCode,
-  Edit3,
 } from 'lucide-react';
 import { Card, CardHeader, CardContent, CardFooter } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { StatusPill } from '../../components/common/StatusPill';
 import { Badge } from '../../components/common/Badge';
-import { ProgressRing, ProgressBar } from '../../components/common/ProgressBar';
+import { ProgressRing } from '../../components/common/ProgressBar';
 import { Modal } from '../../components/common/Modal';
 import { LoadingState } from '../../components/common/LoadingState';
 import { ErrorBanner } from '../../components/common/ErrorBanner';
@@ -39,20 +28,16 @@ import { LearningConsistencyGraph } from '../../components/unit/LearningConsiste
 import { AIResponsibilityReport } from '../../components/unit/AIResponsibilityReport';
 import { ChangeImpactView } from '../../components/unit/ChangeImpactView';
 import { PublishUnitView } from '../../components/unit/PublishUnitView';
-import { api, ApiError } from '../../services/api';
+import { api } from '../../services/api';
 import {
   LearningPack,
   PackHealth,
-  Slot,
-  Asset,
   AssetVersion,
   Claim,
-  QualityFlag,
 } from '../../types';
 
 export const UnitPackPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const unitId = parseInt(id || '1');
 
   // Active Tab
@@ -92,13 +77,40 @@ export const UnitPackPage: React.FC = () => {
   // Version History Modal
   const [versionsModalOpen, setVersionsModalOpen] = useState<boolean>(false);
   const [assetVersions, setAssetVersions] = useState<AssetVersion[]>([]);
-  const [versionDiffs, setVersionDiffs] = useState<any[]>([]);
 
   // Preview Impact Modal
   const [impactModalOpen, setImpactModalOpen] = useState<boolean>(false);
   const [impactChangeParam, setImpactChangeParam] = useState<string>('difficulty:medium->advanced');
   const [impactResult, setImpactResult] = useState<any>(null);
   const [impactLoading, setImpactLoading] = useState<boolean>(false);
+
+  const loadPackData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [p, h, src] = await Promise.all([
+        api.getLearningPack(unitId),
+        api.getUnitHealth(unitId),
+        api.getUnitSourceText(unitId).catch(() => null),
+      ]);
+      setPack(p);
+      setHealth(h);
+      setSourceData(src);
+
+      // Select first slot by default
+      if (p.by_objective?.[0]?.slots?.[0]?.slot) {
+        setSelectedSlotId((prev) => prev ?? p.by_objective[0].slots[0].slot.id);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load learning pack');
+    } finally {
+      setLoading(false);
+    }
+  }, [unitId]);
+
+  useEffect(() => {
+    loadPackData();
+  }, [loadPackData]);
 
   const handlePreviewImpact = async (customChange?: string) => {
     const changeToQuery = customChange || impactChangeParam;
@@ -114,34 +126,6 @@ export const UnitPackPage: React.FC = () => {
       alert(err.message || 'Failed to preview change impact');
     } finally {
       setImpactLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadPackData();
-  }, [unitId]);
-
-  const loadPackData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [p, h, src] = await Promise.all([
-        api.getLearningPack(unitId),
-        api.getUnitHealth(unitId),
-        api.getUnitSourceText(unitId).catch(() => null),
-      ]);
-      setPack(p);
-      setHealth(h);
-      setSourceData(src);
-
-      // Select first slot by default
-      if (p.by_objective?.[0]?.slots?.[0]?.slot && !selectedSlotId) {
-        setSelectedSlotId(p.by_objective[0].slots[0].slot.id);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load learning pack');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -172,18 +156,6 @@ export const UnitPackPage: React.FC = () => {
       } else {
         alert(err.message || 'Failed to update asset status');
       }
-    }
-  };
-
-  const handleSetNeedsRevision = async (assetId: number) => {
-    try {
-      await api.updateAssetStatus(assetId, {
-        status: 'needs_revision',
-        actor: 'Teacher Admin',
-      });
-      loadPackData();
-    } catch (err: any) {
-      alert(err.message || 'Failed to set needs revision');
     }
   };
 
@@ -243,7 +215,6 @@ export const UnitPackPage: React.FC = () => {
     try {
       const data = await api.getAssetVersions(assetId);
       setAssetVersions(data.versions || []);
-      setVersionDiffs(data.diffs || []);
       setVersionsModalOpen(true);
     } catch (err: any) {
       alert(err.message || 'Failed to load versions history');

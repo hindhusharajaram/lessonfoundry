@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Upload,
-  FileText,
   AlertTriangle,
   CheckCircle2,
   Plus,
@@ -10,12 +9,8 @@ import {
   Sparkles,
   ArrowRight,
   ArrowLeft,
-  RefreshCw,
-  Eye,
   ShieldAlert,
   Info,
-  Layers,
-  HelpCircle,
 } from 'lucide-react';
 import { Card, CardHeader, CardContent, CardFooter } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
@@ -25,7 +20,7 @@ import { Badge } from '../../components/common/Badge';
 import { ProgressBar, ProgressRing } from '../../components/common/ProgressBar';
 import { ErrorBanner } from '../../components/common/ErrorBanner';
 import { LoadingState } from '../../components/common/LoadingState';
-import { api, ApiError } from '../../services/api';
+import { api } from '../../services/api';
 import {
   Source,
   SourceVersion,
@@ -36,7 +31,6 @@ import {
   PackHealth,
   UnitDifficulty,
   AnswerVisibility,
-  BloomLevel,
 } from '../../types';
 
 const WIZARD_STEPS: StepItem[] = [
@@ -78,7 +72,7 @@ The second stage is the light-independent reaction, commonly referred to as the 
   const [answerVisibility, setAnswerVisibility] = useState<AnswerVisibility>('after_submission');
   const [quizCount, setQuizCount] = useState<number>(5);
   const [maxWords, setMaxWords] = useState<number>(350);
-  const [vocabNotes, setVocabNotes] = useState<string>('Focus on chloroplast anatomy, Calvin cycle enzymes, and light reactions.');
+  const [vocabNotes] = useState<string>('Focus on chloroplast anatomy, Calvin cycle enzymes, and light reactions.');
 
   const [objectives, setObjectives] = useState<Array<{ id?: number; text: string; bloom_target: string; supported?: boolean; support_note?: string | null }>>([
     {
@@ -205,7 +199,7 @@ The second stage is the light-independent reaction, commonly referred to as the 
       setCreatedUnit(unit);
 
       // 2. Put Objectives
-      const objRes = await api.updateObjectives(
+      await api.updateObjectives(
         unit.id,
         validObjectives.map((o) => ({
           text: o.text.trim(),
