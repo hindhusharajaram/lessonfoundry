@@ -83,3 +83,28 @@
   - Created [`tests/test_advanced_features.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_advanced_features.py) with 6 comprehensive end-to-end unit tests.
   - Updated [`scripts/demo_generate.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/demo_generate.py) running full pipeline from ingestion to publication, grading, and impact analysis.
   - Total Pytest suite: **31 passed, 1 skipped in 5.04s**.
+
+---
+
+### Phase 4: Frontend Studio (`/web`)
+- [x] **App Shell & Theme**:
+  - Initialized React + Vite + TypeScript + Tailwind CSS in `/web`.
+  - Configured design tokens in [`web/src/index.css`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/index.css) (Inter font, Dark Navy `#0B1437` sidebar, Primary Indigo `#4F46E5`, Page `#F5F7FB`, Card radius `14px`, soft shadows, accessible focus rings).
+  - Implemented `RoleContext` supporting teacher and student mode switching via `localStorage` and attaching `X-Role` / `X-Student-Id` headers.
+  - Implemented responsive sidebar navigation for Teacher (Home, Create Learning Unit, My Units, Student Analytics, Settings) and Student (My Learning, My Progress, Notes, Settings).
+  - Configured Vite reverse proxy to FastAPI backend (`http://127.0.0.1:8000/api`). Zero secrets in frontend.
+- [x] **Shared Component Library**:
+  - `Card`, `Button`, `StatusPill`, `Badge` (Bloom levels), `Stepper` (5-step wizard indicator), `ProgressBar`, `ProgressRing` (0-100 score gauge), `ErrorBanner` (with retry & technical details), `Modal`, `EmptyState`, `LoadingState`.
+  - Type-safe API client in [`web/src/services/api.ts`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/services/api.ts).
+- [x] **Teacher Wizard ("Create New Learning Unit")**:
+  - **Step 1 (Upload Source)**: Drag-and-drop / paste text with live character counter, calls `POST /api/sources/upload`, displays extracted stats, SHA256 hash preview, and injection scanner warning banner.
+  - **Step 2 (Objectives & Plan)**: Add/edit/remove objectives (min 2), Bloom target select, grade, difficulty, language, answer visibility, and constraints. Runs gap detection with immediate visual refusal feedback on unsupported objectives.
+  - **Step 3 (AI Generation)**: Live per-slot execution tracker (explanation, example, formative quiz, practice foundation/advanced, revision) with progress bar and Pack Health score ring preview.
+  - **Step 4 (Quality Gate Review)** & **Step 5 (Publish & Export)**: Direct routing to pack review, approval override modal, and class publishing.
+- [x] **Unit Pack Inspector & Student Flow**:
+  - Full inspector in [`web/src/pages/teacher/UnitPackPage.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/pages/teacher/UnitPackPage.tsx) with inline quote highlights, independent solver verification, status approval / override gate, regeneration, and change impact modal.
+  - Interactive Student Assessment in [`web/src/pages/student/StudentQuizPage.tsx`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/web/src/pages/student/StudentQuizPage.tsx) with stripped answer keys and post-submission verified feedback.
+- [x] **Build & Verification**:
+  - `npm.cmd --prefix web run build` succeeds cleanly (`dist/` bundle created).
+  - All 31 backend unit tests pass.
+

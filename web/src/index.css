@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy-900: #0B1437;
+  --color-navy-800: #111C44;
+  --color-navy-700: #1A234A;
+  --color-navy-600: #2B3674;
+
+  --color-brand-50: #EEF2FF;
+  --color-brand-100: #E0E7FF;
+  --color-brand-200: #C7D2FE;
+  --color-brand-500: #6366F1;
+  --color-brand-600: #4F46E5;
+  --color-brand-700: #4338CA;
+
+  --color-page: #F5F7FB;
+  --color-border-subtle: #E5E9F2;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --radius-card: 14px;
+}
+
+body {
+  background-color: #F5F7FB;
+  color: #1E293B;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Custom focus ring for accessibility */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #6366F1, 0 0 0 4px #F5F7FB;
+}
+
+.shadow-card {
+  box-shadow: 0 2px 8px rgba(11, 20, 55, 0.04), 0 1px 2px rgba(11, 20, 55, 0.02);
+}
+
+.shadow-elevated {
+  box-shadow: 0 10px 30px rgba(11, 20, 55, 0.08), 0 2px 6px rgba(11, 20, 55, 0.04);
+}
+
+.animate-in {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
