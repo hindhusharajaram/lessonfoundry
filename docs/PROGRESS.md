@@ -5,7 +5,7 @@
 - [x] **STEP A**: Created [`docs/SPEC.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/docs/SPEC.md) containing the exact source of truth specification.
 - [x] **STEP B**: Created repository layout:
   - `api/` (`main.py`, `deps.py`, `routes_sources.py`, `routes_units.py`, `routes_assets.py`, `routes_student.py`)
-  - `engine/` (`model.py`, `planner.py`, `generator.py`, `verifier.py`, `solver.py`, `guardrails.py`, `impact.py`, `injection.py`)
+  - `engine/` (`model.py`, `planner.py`, `generator.py`, `verifier.py`, `solver.py`, `guardrails.py`, `impact.py`, `injection.py`, `bloom.py`)
   - `db/` (`database.py`, `models.py`, `seed.py`)
   - `eval/`, `tests/`, `data/`, `docs/`, `web/`, `scripts/`
   - `.gitignore`, `requirements.txt`, `.env.example`, `README.md`, `docs/PROGRESS.md`
@@ -23,8 +23,7 @@
 
 ---
 
-### Phase 1 Tasks
-
+### Phase 1: Source Ingestion & Gemini Wrapper
 - [x] **TASK 1 - Source Ingestion**:
   - Implemented [`api/routes_sources.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/api/routes_sources.py) supporting PDF (PyMuPDF) and TXT / pasted text with whitespace normalization.
   - Implemented SHA256 versioning and immutability (same source with new text creates `version_no + 1`, identical hash reuses version).
@@ -39,6 +38,28 @@
 - [x] **TASK 3 - Benchmark Script**:
   - Implemented [`scripts/benchmark_model.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/benchmark_model.py) and generated [`docs/model_benchmark.md`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/docs/model_benchmark.md).
 - [x] **TASK 4 - Test Suite**:
-  - Created [`tests/test_ingest.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_ingest.py) (hash versioning, exact chunk slice reconstruction, injection flags).
-  - Created [`tests/test_json_repair.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_json_repair.py) (markdown fences, trailing commas, mocked repair and re-ask, typed errors).
-  - Created [`tests/test_live_smoke.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_live_smoke.py) with `@pytest.mark.live`.
+  - Created [`tests/test_ingest.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_ingest.py), [`tests/test_json_repair.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_json_repair.py), and [`tests/test_live_smoke.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_live_smoke.py).
+
+---
+
+### Phase 2: Units, Planner, Verifier & Evidence-Locked Generator
+- [x] **TASK 1 - Units & Objectives API**:
+  - Implemented `POST /api/units` (pins latest `SourceVersion`, sets grade, difficulty, constraints).
+  - Implemented `GET /api/units` and `GET /api/units/{id}`.
+  - Implemented `PUT /api/units/{id}/objectives` requiring at least 2 objectives with `bloom_target`.
+- [x] **TASK 2 - Non-LLM Verifier & Planner Engine**:
+  - Implemented [`engine/verifier.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/verifier.py) with exact substring matching and fuzzy string matching (threshold $\ge 0.90$) with precise character start/end offsets.
+  - Implemented [`engine/planner.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/planner.py) with TF-IDF keyword chunk scoring, AI gap detection with mandatory evidence quote verification, and strict refusal of unsupported objectives (`Objective.supported = False`, `QualityFlag(code="objective_unsupported")`, 0 slots created for unsupported objectives).
+  - Implemented blueprint slot distribution balancing core items (explanation, example, revision) and quiz/practice items across supported objectives without orphan slots.
+- [x] **TASK 3 - Bloom Taxonomy & Evidence-Locked Generator**:
+  - Implemented [`engine/bloom.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/bloom.py) mapping cognitive demand (easy $\rightarrow$ Remember/Understand, medium $\rightarrow$ Apply, advanced $\rightarrow$ Analyze/Evaluate).
+  - Implemented [`engine/generator.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/engine/generator.py) generating structured slot content in pedagogical order (explanation $\rightarrow$ example $\rightarrow$ quiz/practice $\rightarrow$ revision) with verbatim quotes on every sentence/step/question/key point.
+  - Extracted and verified claims post-generation, recording `Claim` rows, storing full provenance in `AssetVersion`, setting `status="draft"` or `"needs_revision"` on unverified quotes, and `"generation_failed"` on model errors without corrupting other assets.
+  - Implemented resume generation capability.
+  - Implemented `GET /api/units/{id}/pack` returning structured learning packs grouped by objective with verification ratios and quality flags.
+- [x] **TASK 4 - Verification, Tests & Demo Pipeline**:
+  - Created [`tests/test_verifier.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_verifier.py) (exact, normalized, fuzzy, fabricated quote rejection, multi-chunk resolution).
+  - Created [`tests/test_planner.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_planner.py) (gap detection, refusal of unsupported objectives, blueprint generation).
+  - Created [`tests/test_generator.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/tests/test_generator.py) (provenance persistence, claim tracking, failure isolation, resume capability).
+  - Created [`data/samples/photosynthesis.txt`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/data/samples/photosynthesis.txt) and [`scripts/demo_generate.py`](file:///c:/Users/USER/OneDrive/Attachments/Edu%20Gen%20AI/scripts/demo_generate.py).
+  - Pytest test suite: **25 passed, 1 skipped in 4.92s**.

@@ -167,7 +167,7 @@ class Asset(Base):
     )  # draft | approved | needs_revision | generation_failed
     locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     current_version_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("asset_versions.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("asset_versions.id", ondelete="SET NULL", use_alter=True, name="fk_asset_current_version"), nullable=True
     )
 
     slot: Mapped["Slot"] = relationship("Slot", back_populates="asset")

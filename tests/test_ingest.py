@@ -6,20 +6,50 @@ from db.database import Base, engine, SessionLocal
 from db.models import Source, SourceVersion, SourceChunk
 from engine.injection import scan_for_prompt_injections
 
+from db.models import (
+    Asset,
+    AssetVersion,
+    AttemptAnswer,
+    Claim,
+    DecisionLog,
+    Feedback,
+    Objective,
+    Publication,
+    QualityFlag,
+    QuizAttempt,
+    Slot,
+    Source,
+    SourceChunk,
+    SourceVersion,
+    Unit,
+)
+
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
 def setup_db():
-    Base.metadata.create_all(bind=engine)
-    yield
-    # Clean up after test
     session = SessionLocal()
-    session.query(SourceChunk).delete()
-    session.query(SourceVersion).delete()
-    session.query(Source).delete()
-    session.commit()
-    session.close()
+    try:
+        session.query(AttemptAnswer).delete()
+        session.query(QuizAttempt).delete()
+        session.query(Publication).delete()
+        session.query(QualityFlag).delete()
+        session.query(DecisionLog).delete()
+        session.query(Feedback).delete()
+        session.query(Claim).delete()
+        session.query(AssetVersion).delete()
+        session.query(Asset).delete()
+        session.query(Slot).delete()
+        session.query(Objective).delete()
+        session.query(Unit).delete()
+        session.query(SourceChunk).delete()
+        session.query(SourceVersion).delete()
+        session.query(Source).delete()
+        session.commit()
+    finally:
+        session.close()
+    yield
 
 
 def test_chunk_offsets_reconstruct_exact_text_slice():
