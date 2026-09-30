@@ -19,8 +19,8 @@ DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = DATA_DIR / "model_calls.jsonl"
 
-PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-FALLBACK_MODEL = os.getenv("GEMINI_MODEL_FALLBACK", "gemini-1.5-flash")
+PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+FALLBACK_MODEL = os.getenv("GEMINI_MODEL_FALLBACK", "gemini-3.5-flash")
 
 # Concurrency and rate limiting
 _CALL_LOCK = threading.Lock()
@@ -221,18 +221,101 @@ def _synthesize_grounded_fallback(prompt: str, schema: Type[T]) -> Optional[T]:
     schema_name = getattr(schema, "__name__", str(schema))
     try:
         if schema_name == "ExplanationContent":
-            return schema(
-                title=f"{extracted_term}: Structure and Mechanisms",
-                summary=f"Key concepts regarding {extracted_term} and {second_term} based on verified source principles.",
-                sentences=[
-                    {"text": target_sentence, "quote": target_sentence},
-                    {"text": s2, "quote": s2},
-                    {"text": s3, "quote": s3},
-                ],
-                glossary=[
-                    {"term": extracted_term, "definition": f"Core concept defined in source: {target_sentence}", "quote": target_sentence}
-                ],
+            # Extract target word count if provided in prompt
+            tw_match = (
+                re.search(r"approx(?:imately)?\s+(\d+)\s+words", prompt, re.IGNORECASE)
+                or re.search(r"TARGET\s*\(\s*(\d+)\s*WORDS\s*\)", prompt, re.IGNORECASE)
+                or re.search(r"target of\s+(\d+)\s+words", prompt, re.IGNORECASE)
+                or re.search(r"exceed\s+(\d+)\s+total words", prompt, re.IGNORECASE)
             )
+            target_words = int(tw_match.group(1)) if tw_match else None
+
+            if target_words and target_words > 0:
+                target_min = int(target_words * 0.90)
+                target_max = target_words
+
+                if target_words >= 150:
+                    summary = (
+                        f"{extracted_term} forms a foundational architectural concept in this domain, governing key interactions and mechanisms. "
+                        f"This comprehensive instructional guide examines the operational principles, core characteristics, and evidence-grounded distinctions of {second_term} "
+                        f"as documented directly within the verified source curriculum."
+                    )
+                elif target_words <= 60:
+                    summary = f"{extracted_term} overview: core mechanisms."
+                else:
+                    summary = f"Key concepts regarding {extracted_term} and {second_term} based on verified source principles."
+
+                summary_words = len(summary.split())
+                collected_sentences = []
+                used_indices = set()
+                cur_words = summary_words
+
+                # When target is small (e.g. <= 60), sort by shorter sentences
+                candidate_order = list(range(num_sentences))
+                if target_words <= 60:
+                    candidate_order.sort(key=lambda idx: len(raw_sentences[idx].split()))
+
+                for offset in candidate_order:
+                    idx = (seed_idx + offset) % num_sentences
+                    if idx in used_indices:
+                        continue
+                    cand = raw_sentences[idx]
+                    c_words = len(cand.split())
+                    if cur_words + c_words <= target_max:
+                        collected_sentences.append({"text": cand, "quote": cand})
+                        used_indices.add(idx)
+                        cur_words += c_words
+                    elif len(collected_sentences) < 3 and (cur_words < target_min):
+                        collected_sentences.append({"text": cand, "quote": cand})
+                        used_indices.add(idx)
+                        cur_words += c_words
+                    else:
+                        if cur_words >= target_min and len(collected_sentences) >= 3:
+                            break
+
+                # Ensure minimum 3 sentences per schema
+                while len(collected_sentences) < min(3, num_sentences):
+                    remaining = [i for i in range(num_sentences) if i not in used_indices]
+                    if not remaining:
+                        break
+                    remaining.sort(key=lambda i: len(raw_sentences[i].split()))
+                    best_i = remaining[0]
+                    cand = raw_sentences[best_i]
+                    collected_sentences.append({"text": cand, "quote": cand})
+                    used_indices.add(best_i)
+                    cur_words += len(cand.split())
+
+                insufficient_note = None
+                if cur_words < target_min:
+                    insufficient_note = (
+                        f"Source text contains limited evidence for this objective ({sum(len(s.split()) for s in raw_sentences)} source words). "
+                        f"Generated maximum evidence-supported explanation ({cur_words} words)."
+                    )
+
+                return schema(
+                    title=f"{extracted_term}: Structure and Mechanisms",
+                    summary=summary,
+                    sentences=collected_sentences,
+                    glossary=[
+                        {"term": extracted_term, "definition": f"Core concept defined in source: {target_sentence}", "quote": target_sentence}
+                    ],
+                    actual_word_count=cur_words,
+                    target_word_count=target_words,
+                    insufficient_evidence_note=insufficient_note,
+                )
+            else:
+                return schema(
+                    title=f"{extracted_term}: Structure and Mechanisms",
+                    summary=f"Key concepts regarding {extracted_term} and {second_term} based on verified source principles.",
+                    sentences=[
+                        {"text": target_sentence, "quote": target_sentence},
+                        {"text": s2, "quote": s2},
+                        {"text": s3, "quote": s3},
+                    ],
+                    glossary=[
+                        {"term": extracted_term, "definition": f"Core concept defined in source: {target_sentence}", "quote": target_sentence}
+                    ],
+                )
         elif schema_name == "ExampleContent":
             return schema(
                 problem=f"Step-by-step application: How does {extracted_term} operate according to source principles?",
@@ -441,7 +524,11 @@ def generate_json(
     primary_model = model_name or os.getenv("GEMINI_MODEL", PRIMARY_MODEL)
     fallback_model = os.getenv("GEMINI_MODEL_FALLBACK", FALLBACK_MODEL)
     models_to_try = [primary_model]
-    if fallback_model and fallback_model != primary_model:
+    if (
+        fallback_model
+        and fallback_model != primary_model
+        and fallback_model.lower() not in ("none", "disabled", "false", "")
+    ):
         models_to_try.append(fallback_model)
 
     try:

@@ -47,6 +47,15 @@ class ExplanationContent(BaseModel):
     glossary: List[GlossaryItem] = Field(
         min_length=1, description="List of essential vocabulary definitions with verbatim quotes."
     )
+    actual_word_count: Optional[int] = Field(
+        default=None, description="Actual word count of explanatory body (summary + sentences)."
+    )
+    target_word_count: Optional[int] = Field(
+        default=None, description="Requested target word count."
+    )
+    insufficient_evidence_note: Optional[str] = Field(
+        default=None, description="Note if source evidence was insufficient to reach requested word count."
+    )
 
 
 class StepClaim(BaseModel):
@@ -89,23 +98,34 @@ class RevisionContent(BaseModel):
 # Generation Helpers & Pipeline
 # ==========================================
 
-def count_explanation_words(content_dict: Dict[str, Any]) -> int:
-    """Count actual instructional words in an explanation asset (summary + sentences + glossary)."""
+def count_explanation_words(content_dict: Dict[str, Any], include_glossary: bool = False) -> int:
+    """
+    Count actual instructional words in an explanation asset.
+    By default (include_glossary=False), strictly counts the explanatory body:
+    conceptual summary + instructional sentence texts.
+    Excludes title, glossary, source quotes, and evidence metadata per pedagogical word-count standards.
+    If include_glossary=True, also includes glossary terms and definitions.
+    """
+    if not isinstance(content_dict, dict):
+        return 0
     tokens: List[str] = []
     summary = content_dict.get("summary", "")
-    if summary:
+    if summary and isinstance(summary, str):
         tokens.extend(summary.split())
     for s in content_dict.get("sentences", []):
-        t = s.get("text", "")
-        if t:
-            tokens.extend(t.split())
-    for g in content_dict.get("glossary", []):
-        term = g.get("term", "")
-        defn = g.get("definition", "")
-        if term:
-            tokens.extend(term.split())
-        if defn:
-            tokens.extend(defn.split())
+        if isinstance(s, dict):
+            t = s.get("text", "")
+            if t and isinstance(t, str):
+                tokens.extend(t.split())
+    if include_glossary:
+        for g in content_dict.get("glossary", []):
+            if isinstance(g, dict):
+                term = g.get("term", "")
+                defn = g.get("definition", "")
+                if term and isinstance(term, str):
+                    tokens.extend(term.split())
+                if defn and isinstance(defn, str):
+                    tokens.extend(defn.split())
     return len(tokens)
 
 
@@ -206,7 +226,16 @@ def generate_slot(
         raise ValueError(f"Slot {slot.id} has no supported objective.")
 
     # 1. Retrieve most relevant source chunks for this objective
-    relevant_chunks = score_chunks_for_query(f"{objective.text} {slot.type}", source_version.chunks, top_k=5)
+    top_k_chunks = 5
+    if slot.type == "explanation":
+        raw_mw_check = (unit.constraints or {}).get("max_words") or (unit.constraints or {}).get("max_explanation_words")
+        if raw_mw_check:
+            try:
+                if int(raw_mw_check) >= 150:
+                    top_k_chunks = max(6, min(10, len(source_version.chunks)))
+            except (ValueError, TypeError):
+                pass
+    relevant_chunks = score_chunks_for_query(f"{objective.text} {slot.type}", source_version.chunks, top_k=top_k_chunks)
     source_block = build_source_block(relevant_chunks)
 
     # 2. Retrieve already-generated questions across the unit to prevent duplication
@@ -281,19 +310,48 @@ def generate_slot(
     schema_type: Type[BaseModel]
     if slot.type == "explanation":
         schema_type = ExplanationContent
-        length_clause = ""
         if max_words_constraint and max_words_constraint > 0:
+            target_min = int(max_words_constraint * 0.90)
+            target_max = max_words_constraint
+
+            if max_words_constraint <= 75:
+                summary_hint = "concise conceptual summary (approx 20–30 words)"
+                sentences_hint = "3–5 instructional sentences (each 8–15 words)"
+            elif max_words_constraint <= 130:
+                summary_hint = "focused conceptual summary (approx 25–40 words)"
+                sentences_hint = "4–6 detailed instructional sentences (each 12–18 words)"
+            elif max_words_constraint <= 220:
+                summary_hint = "rich multi-sentence conceptual summary (approx 40–55 words)"
+                sentences_hint = "7–10 detailed instructional sentences (each 15–25 words)"
+            else:
+                summary_hint = "in-depth conceptual summary (approx 50–70 words)"
+                sentences_hint = "10–15 detailed instructional sentences (each 18–25 words)"
+
             length_clause = (
-                f"\nSTRICT WORD COUNT LIMIT: The entire explanation (summary + sentences + glossary) "
-                f"MUST NOT exceed {max_words_constraint} total words. Keep explanations concise, clear, and under {max_words_constraint} words.\n"
+                f"\nMANDATORY EXPLANATION WORD COUNT TARGET ({max_words_constraint} WORDS):\n"
+                f"Write an evidence-grounded explanation of approximately {max_words_constraint} words. "
+                f"Aim for 90–100% of the requested word count ({target_min}–{target_max} words) while using only supported source evidence.\n"
+                f"- The word count target applies strictly to the EXPLANATORY BODY: introductory summary + instructional sentence texts (excluding title, glossary terms/definitions, and source quotes).\n"
+                f"- Summary: Provide a {summary_hint} thoroughly introducing the topic.\n"
+                f"- Sentences: Provide {sentences_hint} to thoroughly cover the source material and achieve the {target_min}–{target_max} word target.\n"
+                f"- Upper Bound: Total explanatory body (summary + sentences) MUST NOT exceed {target_max} words.\n"
+                f"- Evidence Grounding: Every sentence MUST carry a verbatim quote from the source text above. Do NOT invent facts or extrapolate beyond the source.\n"
+                f"- Insufficient Evidence Rule: If the available source evidence contains insufficient facts to safely produce ~{max_words_constraint} words without hallucinating, generate the maximum useful evidence-supported explanation without repeating sentences.\n"
             )
-        prompt = (
-            f"{base_instructions}\n\n"
-            f"{length_clause}"
-            f"Generate an Evidence-Locked Explanation strictly teaching '{objective.text}'.\n"
-            f"Include a title, summary, 3-5 instructional sentences each with a verbatim quote, "
-            f"and a glossary of key terms with definitions and verbatim quotes."
-        )
+            prompt = (
+                f"{base_instructions}\n\n"
+                f"{length_clause}\n"
+                f"Generate an Evidence-Locked Explanation strictly teaching '{objective.text}'.\n"
+                f"Include a title, the conceptual summary, instructional sentences each with a verbatim quote, "
+                f"and a glossary of key terms with definitions and verbatim quotes."
+            )
+        else:
+            prompt = (
+                f"{base_instructions}\n\n"
+                f"Generate an Evidence-Locked Explanation strictly teaching '{objective.text}'.\n"
+                f"Include a title, summary, 3-5 instructional sentences each with a verbatim quote, "
+                f"and a glossary of key terms with definitions and verbatim quotes."
+            )
     elif slot.type == "example":
         schema_type = ExampleContent
         prompt = (
@@ -366,18 +424,37 @@ def generate_slot(
     )
     content_dict = parsed_content.model_dump()
 
-    # 4a. Explanation Word Limit Validation & Revision Loop
+    # 4a. Explanation Word Target Validation & Revision Loop
     if slot.type == "explanation" and max_words_constraint and max_words_constraint > 0:
+        target_min = int(max_words_constraint * 0.90)
+        target_max = max_words_constraint
         actual_words = count_explanation_words(content_dict)
+        source_words = sum(len(c.text.split()) for c in relevant_chunks)
+
         for retry_idx in range(2):
-            if actual_words <= max_words_constraint:
+            if target_min <= actual_words <= target_max:
                 break
-            retry_prompt = (
-                f"{prompt}\n\n"
-                f"REVISION REQUIRED (WORD LIMIT EXCEEDED):\n"
-                f"Your previous explanation contained {actual_words} words, which exceeds the teacher's limit of {max_words_constraint} words.\n"
-                f"Rewrite and compress the explanation to be strictly under {max_words_constraint} total words while retaining accurate sentences and source quotes."
-            )
+            if actual_words < target_min and source_words < target_min:
+                break
+
+            if actual_words > target_max:
+                retry_prompt = (
+                    f"{prompt}\n\n"
+                    f"REVISION REQUIRED (WORD LIMIT EXCEEDED):\n"
+                    f"Your previous explanation contained {actual_words} words, which exceeds the teacher's limit of {target_max} words.\n"
+                    f"Rewrite and compress the explanation body (summary + sentences) to be between {target_min} and {target_max} total words while retaining accurate sentences and source quotes."
+                )
+            else:
+                retry_prompt = (
+                    f"{prompt}\n\n"
+                    f"REVISION REQUIRED (WORD COUNT TARGET NOT MET):\n"
+                    f"The teacher requested an explanation of approximately {max_words_constraint} words (target range: {target_min}–{target_max} words).\n"
+                    f"Your previous explanation body had only {actual_words} words, which is substantially below the requested target.\n"
+                    f"Please expand the explanation by adding more detailed instructional sentences and expanding the conceptual summary using the provided source evidence.\n"
+                    f"Aim for {target_min}–{target_max} words in the explanatory body while keeping every claim strictly evidence-locked with verbatim quotes.\n"
+                    f"Do NOT invent facts or duplicate existing sentences."
+                )
+
             try:
                 retry_parsed, retry_meta = generate_json(
                     prompt=retry_prompt,
@@ -387,7 +464,7 @@ def generate_slot(
                 )
                 retry_dict = retry_parsed.model_dump()
                 new_words = count_explanation_words(retry_dict)
-                if new_words <= max_words_constraint or new_words < actual_words:
+                if (target_min <= new_words <= target_max) or (actual_words < target_min and new_words > actual_words and new_words <= target_max) or (actual_words > target_max and new_words < actual_words):
                     content_dict = retry_dict
                     meta = retry_meta
                     actual_words = new_words
@@ -548,6 +625,12 @@ def generate_slot(
 
     if slot.type == "explanation" and max_words_constraint and max_words_constraint > 0:
         exp_words = count_explanation_words(content_dict)
+        target_min = int(max_words_constraint * 0.90)
+        source_words = sum(len(c.text.split()) for c in relevant_chunks)
+
+        content_dict["actual_word_count"] = exp_words
+        content_dict["target_word_count"] = max_words_constraint
+
         if exp_words > max_words_constraint:
             flag = QualityFlag(
                 unit_id=unit.id,
@@ -558,6 +641,29 @@ def generate_slot(
             )
             db.add(flag)
             asset.status = "needs_revision"
+        elif exp_words < target_min:
+            if source_words < max_words_constraint:
+                content_dict["insufficient_evidence_note"] = (
+                    f"Source evidence was insufficient to safely produce {max_words_constraint} words without hallucination. "
+                    f"Generated maximum evidence-supported explanation ({exp_words} words)."
+                )
+                flag = QualityFlag(
+                    unit_id=unit.id,
+                    asset_version_id=asset_version.id,
+                    code="insufficient_evidence_for_word_target",
+                    severity="info",
+                    message=f"Source evidence contains limited text for this objective ({source_words} words in relevant chunks). Explanation produced maximum supported length ({exp_words} words of {max_words_constraint} requested).",
+                )
+                db.add(flag)
+            else:
+                flag = QualityFlag(
+                    unit_id=unit.id,
+                    asset_version_id=asset_version.id,
+                    code="word_count_below_target",
+                    severity="warning",
+                    message=f"Explanation body contains {exp_words} words, below the requested target of {max_words_constraint} words ({target_min}-{max_words_constraint} target range).",
+                )
+                db.add(flag)
 
     db.commit()
     db.refresh(asset_version)

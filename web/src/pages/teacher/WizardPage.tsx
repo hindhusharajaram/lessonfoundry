@@ -920,9 +920,12 @@ export const WizardPage: React.FC = () => {
                         const raw = e.target.value;
                         setMaxWords(raw === '' ? '' : parseInt(raw, 10));
                       }}
-                      placeholder="e.g. 350"
+                      placeholder="e.g. 200"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:bg-white focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5]"
                     />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Generation target for the explanatory body. Aims for 90–100% of this target while remaining strictly evidence-locked.
+                    </p>
                   </div>
                 </CardContent>
 

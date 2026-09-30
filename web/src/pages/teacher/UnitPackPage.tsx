@@ -671,6 +671,27 @@ export const UnitPackPage: React.FC = () => {
                             {activeItem.asset.current_version.content.summary}
                           </p>
 
+                          {activeItem.asset.current_version.content.insufficient_evidence_note && (
+                            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs flex items-start gap-2">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                              <span>{activeItem.asset.current_version.content.insufficient_evidence_note}</span>
+                            </div>
+                          )}
+
+                          {activeItem.asset.current_version.content.actual_word_count && (
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+                              <span className="font-semibold text-slate-700">Explanatory Body:</span>
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-mono text-[10px]">
+                                {activeItem.asset.current_version.content.actual_word_count} words
+                              </span>
+                              {activeItem.asset.current_version.content.target_word_count && (
+                                <span className="text-slate-400">
+                                  (Target: {activeItem.asset.current_version.content.target_word_count} words)
+                                </span>
+                              )}
+                            </div>
+                          )}
+
                           <div className="space-y-2 mt-3">
                             <div className="flex items-center justify-between text-slate-700">
                               <span className="font-semibold block">

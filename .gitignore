@@ -85,3 +85,5 @@ Thumbs.db
 *.swo
 .vscode/*
 !.vscode/settings.json
+
+*.db-journal
