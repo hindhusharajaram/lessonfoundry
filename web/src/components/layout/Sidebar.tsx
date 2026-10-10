@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   ChevronRight,
   LogOut,
+  UserCheck,
 } from 'lucide-react';
 import { useRole } from '../../context/RoleContext';
 
@@ -20,6 +21,7 @@ export const Sidebar: React.FC = () => {
 
   const teacherLinks = [
     { to: '/', label: 'Home', icon: Home, end: true },
+    { to: '/attendance', label: 'Attendance', icon: UserCheck },
     { to: '/create', label: 'Create Learning Unit', icon: PlusCircle },
     { to: '/analytics', label: 'Student Analytics', icon: BarChart3 },
     { to: '/trust-safety', label: 'Trust & Safety', icon: ShieldCheck },

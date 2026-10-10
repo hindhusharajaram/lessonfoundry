@@ -11,6 +11,9 @@ import {
   Claim,
   QualityFlag,
   Role,
+  AttendanceRecord,
+  SessionAttendanceReport,
+  ClassSessionSummary,
 } from '../types';
 
 export class ApiError extends Error {
@@ -29,15 +32,34 @@ export class ApiError extends Error {
 export function getAuthHeaders(): Record<string, string> {
   const role: Role = (localStorage.getItem('lessonfoundry_role') as Role) || 'teacher';
   const studentId = localStorage.getItem('lessonfoundry_student_id') || '1';
+  const userId = localStorage.getItem('lessonfoundry_user_id') || '';
+  const email = localStorage.getItem('lessonfoundry_email') || '';
 
-  return {
+  const headers: Record<string, string> = {
     'X-Role': role,
     'X-Student-Id': studentId,
   };
+  if (userId) {
+    headers['X-User-Id'] = userId;
+  }
+  if (email) {
+    headers['X-User-Email'] = email;
+  }
+
+  return headers;
+}
+
+// Base API URL configuration (defaults to empty string for relative proxying in dev, or VITE_API_URL in production)
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
+export function getFullUrl(endpoint: string): string {
+  const clean = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const path = clean.startsWith('/api') ? clean : `/api${clean}`;
+  return `${API_BASE_URL}${path}`;
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = endpoint.startsWith('/api') ? endpoint : `/api${endpoint}`;
+  const url = getFullUrl(endpoint);
   const headers = {
     ...getAuthHeaders(),
     ...(options.headers || {}),
@@ -50,15 +72,21 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       try {
         errData = await response.json();
       } catch {
-        errData = { detail: response.statusText };
+        const text = await response.text().catch(() => '');
+        errData = { detail: text || response.statusText || `HTTP ${response.status}` };
       }
-      const message = errData?.detail || errData?.message || `Request failed with status ${response.status}`;
+      let message = errData?.detail || errData?.message;
+      if (response.status === 404) {
+        message = `API endpoint not found (HTTP 404) at ${url}. If using Vercel, ensure your backend server URL is configured in VITE_API_URL, or use the local server at http://localhost:5173.`;
+      } else if (!message) {
+        message = `Request failed with status ${response.status}`;
+      }
       throw new ApiError(response.status, message, errData);
     }
     return await response.json();
   } catch (err: any) {
     if (err instanceof ApiError) throw err;
-    throw new ApiError(500, err.message || 'Network error occurred');
+    throw new ApiError(500, err.message || 'Network error occurred', err);
   }
 }
 
@@ -288,6 +316,47 @@ function normalizePackResponse(raw: any, healthData?: PackHealth): LearningPack 
   };
 }
 
+function normalizeAttendanceReport(raw: any): SessionAttendanceReport {
+  const records: AttendanceRecord[] = raw.records || [
+    ...(Array.isArray(raw.present_students) && typeof raw.present_students[0] === 'object' ? raw.present_students : []),
+    ...(Array.isArray(raw.absent_students) && typeof raw.absent_students[0] === 'object' ? raw.absent_students : []),
+  ];
+  const presentNames: string[] =
+    raw.present_student_names ||
+    (Array.isArray(raw.present_students)
+      ? raw.present_students.map((s: any) => (typeof s === 'string' ? s : s.name))
+      : []);
+  const absentNames: string[] =
+    raw.absent_student_names ||
+    (Array.isArray(raw.absent_students)
+      ? raw.absent_students.map((s: any) => (typeof s === 'string' ? s : s.name))
+      : []);
+
+  const totalStudents = raw.total_students ?? records.length;
+  const presentCount = raw.present_count ?? presentNames.length;
+  const absentCount = raw.absent_count ?? absentNames.length;
+  const percentage =
+    raw.attendance_percentage ??
+    (totalStudents > 0 ? Math.round((presentCount / totalStudents) * 1000) / 10 : 0);
+
+  return {
+    session_id: raw.session_id,
+    session_title: raw.session_title,
+    class_label: raw.class_label,
+    unit_id: raw.unit_id,
+    unit_title: raw.unit_title,
+    total_students: totalStudents,
+    present_count: presentCount,
+    absent_count: absentCount,
+    attendance_percentage: percentage,
+    present_students: presentNames,
+    absent_students: absentNames,
+    records: records,
+    empty_state: Boolean(raw.empty_state || totalStudents === 0 || presentCount === 0),
+    empty_message: raw.empty_message,
+  };
+}
+
 export const api = {
   // Sources
   async uploadSource(params: { file?: File; title?: string; text?: string }): Promise<{
@@ -308,15 +377,35 @@ export const api = {
       formData.append('text', params.text);
     }
 
-    const response = await fetch('/api/sources/upload', {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: formData,
-    });
+    const url = getFullUrl('/sources/upload');
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData,
+      });
+    } catch (networkErr: any) {
+      const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+      const guidance = isVercel
+        ? `Backend server not reachable at ${url}. When hosting on Vercel, please set VITE_API_URL to your deployed backend URL (e.g. Render/Railway) in Vercel Project Settings, or run the app locally at http://localhost:5173.`
+        : `Cannot connect to the backend server at ${url}. Please ensure the FastAPI backend is running on port 8000.`;
+      throw new ApiError(503, guidance, networkErr);
+    }
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new ApiError(response.status, err.detail || 'Failed to upload source', err);
+      let err: any = null;
+      try {
+        err = await response.json();
+      } catch {
+        const text = await response.text().catch(() => '');
+        err = { detail: text || response.statusText || `HTTP ${response.status}` };
+      }
+      let message = err?.detail || err?.message;
+      if (response.status === 404) {
+        message = `Backend server not reachable at ${url} (HTTP 404). When hosting on Vercel, please set VITE_API_URL to your deployed backend (e.g. Render/Railway) in Vercel Project Settings, or run the app locally at http://localhost:5173.`;
+      }
+      throw new ApiError(response.status, message || 'Failed to upload source', err);
     }
     const raw = await response.json();
     return normalizeUploadResponse(raw);
@@ -638,6 +727,112 @@ export const api = {
 
   async getHealth(): Promise<{ status: string; app: string; version: string }> {
     return request('/health');
+  },
+
+  // Attendance Endpoints
+  async getTeacherSessions(): Promise<ClassSessionSummary[]> {
+    const res: any = await request('/teacher/sessions');
+    return Array.isArray(res) ? res : res?.sessions || [];
+  },
+
+  async getSessionAttendance(sessionId: number): Promise<SessionAttendanceReport> {
+    const raw: any = await request(`/teacher/sessions/${sessionId}/attendance`);
+    return normalizeAttendanceReport(raw);
+  },
+
+  async createClassSession(data: {
+    title: string;
+    class_label?: string;
+    unit_id?: number;
+  }): Promise<ClassSessionSummary> {
+    return request('/teacher/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  },
+
+  async markAttendance(
+    sessionId: number,
+    studentId: number,
+    status: 'present' | 'absent' = 'present'
+  ): Promise<{ status: string; attendance: AttendanceRecord }> {
+    return request(`/sessions/${sessionId}/attendance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id: studentId, status }),
+    });
+  },
+
+  async markAttendanceBulk(
+    sessionId: number,
+    records: Array<{ student_id: number; status: 'present' | 'absent' }>
+  ): Promise<{ status: string; updated_count: number }> {
+    return request(`/sessions/${sessionId}/attendance/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records }),
+    });
+  },
+
+  async studentJoinSession(sessionId: number): Promise<{ status: string; message: string; attendance: any }> {
+    return request(`/student/sessions/${sessionId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
+
+  async getUnitAttendance(unitId: number): Promise<SessionAttendanceReport> {
+    const raw: any = await request(`/teacher/units/${unitId}/attendance`);
+    return normalizeAttendanceReport(raw);
+  },
+
+  async recordStudentActivity(
+    unitId: number,
+    data: { asset_id?: number; activity_type?: string } = {}
+  ): Promise<any> {
+    return request(`/student/units/${unitId}/activity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unit_id: unitId, ...data }),
+    });
+  },
+
+  // Auth Endpoints
+  async login(credentials: { email: string; password?: string }): Promise<{
+    user_id: number;
+    name: string;
+    email: string;
+    role: Role;
+    student_id?: number | null;
+    token: string;
+  }> {
+    return request('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    });
+  },
+
+  async register(data: {
+    name: string;
+    email: string;
+    password?: string;
+    role: 'teacher' | 'student';
+    join_code?: string;
+  }): Promise<{
+    user_id: number;
+    name: string;
+    email: string;
+    role: Role;
+    student_id?: number | null;
+    token: string;
+  }> {
+    return request('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
   },
 };
 

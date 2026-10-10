@@ -98,6 +98,65 @@ def get_student_unit(
             detail="This unit has not been published for students yet.",
         )
 
+    # Automatically record student attendance for this unit
+    from db.models import Attendance, ClassSession, utc_now
+    student = None
+    if auth.user_id:
+        student = db.query(Student).filter(Student.student_user_id == auth.user_id).first()
+    if not student and auth.student_id:
+        student = db.query(Student).filter(Student.id == auth.student_id).first()
+
+    if student:
+        session = (
+            db.query(ClassSession)
+            .filter(ClassSession.unit_id == unit_id, ClassSession.is_active == True)
+            .order_by(ClassSession.id.desc())
+            .first()
+        )
+        if not session:
+            unit_obj = db.query(Unit).filter(Unit.id == unit_id).first()
+            teacher = db.query(User).filter(User.role == "teacher").first()
+            session = ClassSession(
+                teacher_user_id=teacher.id if teacher else 1,
+                unit_id=unit_id,
+                title=f"{unit_obj.title if unit_obj else f'Unit {unit_id}'} - Assessment",
+                class_label="All",
+                is_active=True,
+            )
+            db.add(session)
+            db.flush()
+        session_id = session.id
+        att = (
+            db.query(Attendance)
+            .filter(
+                Attendance.student_id == student.id,
+                (Attendance.unit_id == unit_id) | (Attendance.session_id == session_id if session_id else False)
+            )
+            .first()
+        )
+        if att:
+            if att.status != "present":
+                att.status = "present"
+                att.attended_at = utc_now()
+            if session_id and not att.session_id:
+                att.session_id = session_id
+            if not att.unit_id:
+                att.unit_id = unit_id
+            if not att.activity_type:
+                att.activity_type = "opened_lesson"
+            db.commit()
+        else:
+            att = Attendance(
+                session_id=session_id,
+                unit_id=unit_id,
+                student_id=student.id,
+                status="present",
+                activity_type="opened_lesson",
+                attended_at=utc_now(),
+            )
+            db.add(att)
+            db.commit()
+
     slots = db.query(Slot).filter(Slot.unit_id == unit_id).order_by(Slot.position).all()
     student_slots = []
 
@@ -201,6 +260,56 @@ def submit_student_attempt(
     attempt.score = score_pct
     db.commit()
     db.refresh(attempt)
+
+    # Automatically record quiz submission in attendance
+    from db.models import Attendance, ClassSession, utc_now
+    session = (
+        db.query(ClassSession)
+        .filter(ClassSession.unit_id == unit.id, ClassSession.is_active == True)
+        .order_by(ClassSession.id.desc())
+        .first()
+    )
+    if not session:
+        teacher = db.query(User).filter(User.role == "teacher").first()
+        session = ClassSession(
+            teacher_user_id=teacher.id if teacher else 1,
+            unit_id=unit.id,
+            title=f"{unit.title} - Assessment",
+            class_label="All",
+            is_active=True,
+        )
+        db.add(session)
+        db.flush()
+    session_id = session.id
+    att = (
+        db.query(Attendance)
+        .filter(
+            Attendance.student_id == student.id,
+            (Attendance.unit_id == unit.id) | (Attendance.session_id == session_id if session_id else False)
+        )
+        .first()
+    )
+    if att:
+        att.status = "present"
+        att.activity_type = "completed_quiz"
+        att.score = score_pct
+        att.attended_at = utc_now()
+        if session_id and not att.session_id:
+            att.session_id = session_id
+        if not att.unit_id:
+            att.unit_id = unit.id
+    else:
+        att = Attendance(
+            session_id=session_id,
+            unit_id=unit.id,
+            student_id=student.id,
+            status="present",
+            activity_type="completed_quiz",
+            score=score_pct,
+            attended_at=utc_now(),
+        )
+        db.add(att)
+    db.commit()
 
     return {
         "attempt_id": attempt.id,

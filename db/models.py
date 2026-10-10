@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
@@ -98,6 +99,7 @@ class Unit(Base):
     slots: Mapped[List["Slot"]] = relationship(
         "Slot", back_populates="unit", cascade="all, delete-orphan", order_by="Slot.position"
     )
+    sessions: Mapped[List["ClassSession"]] = relationship("ClassSession", back_populates="unit")
     quality_flags: Mapped[List["QualityFlag"]] = relationship(
         "QualityFlag", back_populates="unit", cascade="all, delete-orphan"
     )
@@ -326,6 +328,9 @@ class User(Base):
     student_profiles: Mapped[List["Student"]] = relationship(
         "Student", back_populates="user", cascade="all, delete-orphan"
     )
+    sessions: Mapped[List["ClassSession"]] = relationship(
+        "ClassSession", back_populates="teacher", cascade="all, delete-orphan"
+    )
 
 
 class Enrollment(Base):
@@ -359,6 +364,7 @@ class Student(Base):
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     class_label: Mapped[str] = mapped_column(String(100), default="Class A")
     synthetic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -366,6 +372,15 @@ class Student(Base):
     attempts: Mapped[List["QuizAttempt"]] = relationship(
         "QuizAttempt", back_populates="student", cascade="all, delete-orphan"
     )
+
+    @property
+    def resolved_email(self) -> str:
+        if self.email:
+            return self.email
+        if self.user and self.user.email:
+            return self.user.email
+        clean_name = self.name.lower().replace(" ", ".").replace("#", "")
+        return f"{clean_name}@lessonfoundry.edu"
 
 
 class QuizAttempt(Base):
@@ -419,3 +434,54 @@ class Publication(Base):
     snapshot: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     unit: Mapped["Unit"] = relationship("Unit", back_populates="publications")
+
+
+class ClassSession(Base):
+    __tablename__ = "class_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    teacher_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    unit_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("units.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    class_label: Mapped[str] = mapped_column(String(100), default="Class 10-A")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    teacher: Mapped["User"] = relationship("User", foreign_keys=[teacher_user_id], back_populates="sessions")
+    unit: Mapped[Optional["Unit"]] = relationship("Unit", back_populates="sessions")
+    attendances: Mapped[List["Attendance"]] = relationship(
+        "Attendance", back_populates="session", cascade="all, delete-orphan"
+    )
+
+
+class Attendance(Base):
+    __tablename__ = "attendances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("class_sessions.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    unit_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("units.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    asset_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("assets.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    student_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(50), default="present", nullable=False)  # "present" or "absent"
+    activity_type: Mapped[str] = mapped_column(String(50), default="attended", nullable=False)  # "opened_lesson", "completed_quiz", "attended"
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    attended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    session: Mapped[Optional["ClassSession"]] = relationship("ClassSession", back_populates="attendances")
+    student: Mapped["Student"] = relationship("Student")
+    unit: Mapped[Optional["Unit"]] = relationship("Unit")
+    asset: Mapped[Optional["Asset"]] = relationship("Asset")

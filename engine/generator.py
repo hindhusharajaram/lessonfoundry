@@ -725,43 +725,65 @@ def generate_unit_pack(unit_id: int, db: Session) -> Dict[str, Any]:
     failed_count = 0
     skipped_count = 0
 
+    import concurrent.futures
+    from db.database import SessionLocal
+
+    def _worker_process_slot(slot_id: int) -> Tuple[str, Optional[str]]:
+        thread_db = SessionLocal()
+        try:
+            slot = thread_db.query(Slot).filter(Slot.id == slot_id).first()
+            if not slot:
+                return "failed", "Slot not found"
+            asset = slot.asset
+            if asset and asset.current_version_id and asset.status in ["draft", "approved", "needs_revision"]:
+                return "skipped", None
+            generate_slot(slot, thread_db)
+            return "generated", None
+        except Exception as e:
+            try:
+                slot = thread_db.query(Slot).filter(Slot.id == slot_id).first()
+                if slot and slot.asset:
+                    slot.asset.status = "generation_failed"
+                    flag = QualityFlag(
+                        unit_id=slot.unit_id,
+                        code="generation_failed",
+                        severity="error",
+                        message=f"Slot {slot.id} ({slot.type}) failed: {str(e)}",
+                    )
+                    thread_db.add(flag)
+                    thread_db.commit()
+            except Exception:
+                pass
+            return "failed", str(e)
+        finally:
+            thread_db.close()
+
+    slots_to_generate = []
     for slot in sorted_slots:
         asset = slot.asset
-        # Resume rule: skip already generated unless failed or empty
         if asset and asset.current_version_id and asset.status in ["draft", "approved", "needs_revision"]:
             skipped_count += 1
-            continue
+        else:
+            slots_to_generate.append(slot.id)
 
-        try:
-            generate_slot(slot, db)
-            generated_count += 1
-        except ModelError as me:
-            failed_count += 1
-            if asset:
-                asset.status = "generation_failed"
-                flag = QualityFlag(
-                    unit_id=unit.id,
-                    code="generation_failed",
-                    severity="error",
-                    message=f"Slot {slot.id} ({slot.type}) failed generation: {str(me)}",
-                )
-                db.add(flag)
-                db.commit()
-        except Exception as e:
-            failed_count += 1
-            if asset:
-                asset.status = "generation_failed"
-                flag = QualityFlag(
-                    unit_id=unit.id,
-                    code="generation_failed",
-                    severity="error",
-                    message=f"Slot {slot.id} ({slot.type}) unexpected error: {str(e)}",
-                )
-                db.add(flag)
-                db.commit()
+    if slots_to_generate:
+        max_workers = min(4, len(slots_to_generate))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_slot = {executor.submit(_worker_process_slot, sid): sid for sid in slots_to_generate}
+            for future in concurrent.futures.as_completed(future_to_slot):
+                outcome, _ = future.result()
+                if outcome == "generated":
+                    generated_count += 1
+                elif outcome == "skipped":
+                    skipped_count += 1
+                else:
+                    failed_count += 1
 
-    unit.status = "generated"
-    db.commit()
+    db.expire_all()
+    unit = db.query(Unit).filter(Unit.id == unit_id).first()
+    if unit:
+        unit.status = "generated"
+        db.commit()
 
     # Automatically execute guardrails across the unit
     from engine.guardrails import run_unit_guardrails

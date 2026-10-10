@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-09-29T17:25:33.934130+00:00",
-  "model": "gemini-2.5-flash",
-  "duration_seconds": 8.87,
+  "timestamp": "2026-10-10T04:30:55.415102+00:00",
+  "model": "gemini-3.8-flash",
+  "duration_seconds": 59.36,
   "summary": {
     "total_cases": 9,
     "passed": 9,

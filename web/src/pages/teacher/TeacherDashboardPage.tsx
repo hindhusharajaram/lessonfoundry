@@ -22,6 +22,7 @@ import { useRole } from '../../context/RoleContext';
 import { useSearch } from '../../context/SearchContext';
 import { api } from '../../services/api';
 import { Unit, PackHealth } from '../../types';
+import { AttendanceTracker } from '../../components/attendance/AttendanceTracker';
 
 function useCountUp(end: number, duration: number = 600): number {
   const [count, setCount] = useState(() => (end > 0 ? 0 : end));
@@ -356,7 +357,10 @@ export const TeacherDashboardPage: React.FC = () => {
             )}
           </div>
 
-          {/* 3. "RECENT ACTIVITY" PANEL (Replaces Groups with real DecisionLog data) */}
+          {/* 3. "ATTENDANCE TRACKING" SECTION */}
+          <AttendanceTracker embedded />
+
+          {/* 4. "RECENT ACTIVITY" PANEL (Replaces Groups with real DecisionLog data) */}
           <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-100 shadow-sm transition-all duration-200 hover:shadow-md">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">

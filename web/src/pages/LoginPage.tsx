@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, GraduationCap, School, ArrowRight } from 'lucide-react';
 import { useRole } from '../context/RoleContext';
+import { api } from '../services/api';
 import { TeacherIllustration } from '../components/TeacherIllustration';
 import { StudentIllustration } from '../components/StudentIllustration';
 
@@ -18,39 +19,77 @@ export const LoginPage: React.FC = () => {
 
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isFormValid) return;
 
-    if (activePortal === 'teacher') {
-      const email = username.trim().includes('@')
-        ? username.trim()
-        : `${username.trim().toLowerCase()}@lessonfoundry.edu`;
-      const cleanName = username.trim().includes('@')
-        ? username.trim().split('@')[0]
-        : username.trim();
-      const formatted = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+    const cleanUser = username.trim();
+    const email = cleanUser.includes('@')
+      ? cleanUser.toLowerCase()
+      : `${cleanUser.toLowerCase().replace(/ /g, '.')}@lessonfoundry.edu`;
+    const cleanName = cleanUser.includes('@') ? cleanUser.split('@')[0] : cleanUser;
+    const formatted = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
 
-      setRole('teacher');
-      setTeacherName(formatted);
-      setTeacherEmail(email);
-      localStorage.setItem('lessonfoundry_token', 'lf_teacher_session_' + Date.now());
-      localStorage.setItem('lessonfoundry_role', 'teacher');
-      localStorage.setItem('lessonfoundry_teacher_name', formatted);
-      localStorage.setItem('lessonfoundry_email', email);
-      localStorage.setItem('lessonfoundry_username', username.trim());
-      navigate('/units');
-    } else {
-      setRole('student');
-      setStudentId('1');
-      if (username.trim()) {
-        setStudentName(username.trim());
+    try {
+      let authUser: any = null;
+      try {
+        authUser = await api.login({ email, password });
+      } catch (loginErr: any) {
+        if (loginErr.status === 401 || loginErr.status === 404 || isSignUp) {
+          authUser = await api.register({
+            name: formatted,
+            email,
+            password,
+            role: activePortal,
+          });
+        } else {
+          throw loginErr;
+        }
       }
-      localStorage.setItem('lessonfoundry_token', 'lf_student_session_' + Date.now());
-      localStorage.setItem('lessonfoundry_role', 'student');
-      localStorage.setItem('lessonfoundry_student_id', '1');
-      localStorage.setItem('lessonfoundry_student_name', username.trim());
-      navigate('/student');
+
+      if (authUser) {
+        if (activePortal === 'teacher') {
+          setRole('teacher');
+          setTeacherName(authUser.name || formatted);
+          setTeacherEmail(authUser.email || email);
+          localStorage.setItem('lessonfoundry_user_id', String(authUser.user_id));
+          localStorage.setItem('lessonfoundry_teacher_name', authUser.name || formatted);
+          localStorage.setItem('lessonfoundry_email', authUser.email || email);
+          localStorage.setItem('lessonfoundry_role', 'teacher');
+          navigate('/units');
+        } else {
+          setRole('student');
+          setStudentName(authUser.name || formatted);
+          const stId = String(authUser.student_id || authUser.user_id || '1');
+          setStudentId(stId);
+          localStorage.setItem('lessonfoundry_user_id', String(authUser.user_id));
+          localStorage.setItem('lessonfoundry_student_id', stId);
+          localStorage.setItem('lessonfoundry_student_name', authUser.name || formatted);
+          localStorage.setItem('lessonfoundry_email', authUser.email || email);
+          localStorage.setItem('lessonfoundry_role', 'student');
+          navigate('/student');
+        }
+      }
+    } catch (err) {
+      console.warn('Backend login fallback to local session:', err);
+      if (activePortal === 'teacher') {
+        setRole('teacher');
+        setTeacherName(formatted);
+        setTeacherEmail(email);
+        localStorage.setItem('lessonfoundry_role', 'teacher');
+        localStorage.setItem('lessonfoundry_teacher_name', formatted);
+        localStorage.setItem('lessonfoundry_email', email);
+        navigate('/units');
+      } else {
+        setRole('student');
+        setStudentName(formatted);
+        setStudentId('1');
+        localStorage.setItem('lessonfoundry_role', 'student');
+        localStorage.setItem('lessonfoundry_student_id', '1');
+        localStorage.setItem('lessonfoundry_student_name', formatted);
+        localStorage.setItem('lessonfoundry_email', email);
+        navigate('/student');
+      }
     }
   };
 

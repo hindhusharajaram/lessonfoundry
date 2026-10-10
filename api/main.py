@@ -6,6 +6,7 @@ from api.routes_assets import router as assets_router
 from api.routes_student import router as student_router
 from api.routes_auth import router as auth_router
 from api.routes_teacher import router as teacher_router
+from api.routes_attendance import router as attendance_router
 from db.database import init_db
 
 app = FastAPI(
@@ -37,10 +38,12 @@ def health_check():
     }
 
 
-# Mount all API routers under /api
+# Mount all API routers under /api and root aliases
 app.include_router(auth_router, prefix="/api")
 app.include_router(sources_router, prefix="/api")
 app.include_router(units_router, prefix="/api")
 app.include_router(assets_router, prefix="/api")
 app.include_router(student_router, prefix="/api")
 app.include_router(teacher_router, prefix="/api")
+app.include_router(attendance_router, prefix="/api")
+app.include_router(attendance_router)

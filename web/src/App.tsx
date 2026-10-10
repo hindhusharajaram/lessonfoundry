@@ -9,6 +9,7 @@ import { TeacherDashboardPage } from './pages/teacher/TeacherDashboardPage';
 import { WizardPage } from './pages/teacher/WizardPage';
 import { UnitPackPage } from './pages/teacher/UnitPackPage';
 import { AnalyticsPage } from './pages/teacher/AnalyticsPage';
+import { AttendancePage } from './pages/teacher/AttendancePage';
 import { SettingsPage } from './pages/teacher/SettingsPage';
 import { TrustSafetyPage } from './pages/teacher/TrustSafetyPage';
 import { StudentLearningPage } from './pages/student/StudentLearningPage';
@@ -58,6 +59,14 @@ const AppRoutes: React.FC = () => {
                 element={
                   <ProtectedRoute allowedRole="teacher">
                     <TeacherDashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/attendance"
+                element={
+                  <ProtectedRoute allowedRole="teacher">
+                    <AttendancePage />
                   </ProtectedRoute>
                 }
               />

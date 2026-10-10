@@ -188,3 +188,39 @@ export interface LearningPack {
     }[];
   }[];
 }
+
+export interface AttendanceRecord {
+  student_id: number;
+  name: string;
+  email: string;
+  status: 'present' | 'absent';
+  activity_type?: string | null;
+  score?: number | null;
+  attended_at: string | null;
+}
+
+export interface SessionAttendanceReport {
+  session_id: number;
+  session_title: string;
+  class_label?: string | null;
+  unit_id?: number | null;
+  unit_title?: string | null;
+  total_students: number;
+  present_count: number;
+  absent_count: number;
+  attendance_percentage: number;
+  present_students: string[];
+  absent_students: string[];
+  records: AttendanceRecord[];
+  empty_state?: boolean;
+  empty_message?: string | null;
+}
+
+export interface ClassSessionSummary {
+  id: number;
+  title: string;
+  class_label?: string | null;
+  unit_id?: number | null;
+  is_active: boolean;
+  created_at?: string | null;
+}

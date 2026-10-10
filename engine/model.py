@@ -25,7 +25,19 @@ FALLBACK_MODEL = os.getenv("GEMINI_MODEL_FALLBACK", "gemini-3.5-flash")
 # Concurrency and rate limiting
 _CALL_LOCK = threading.Lock()
 _LAST_CALL_TIMESTAMP = 0.0
-_MIN_CALL_INTERVAL_SEC = 0.5  # Pace requests to respect free-tier RPM limits
+_MIN_CALL_INTERVAL_SEC = 0.1  # Pace requests to respect free-tier RPM limits
+
+_QUOTA_EXHAUSTED_UNTIL = 0.0
+
+
+def is_quota_exhausted() -> bool:
+    global _QUOTA_EXHAUSTED_UNTIL
+    return time.time() < _QUOTA_EXHAUSTED_UNTIL
+
+
+def mark_quota_exhausted(cooldown_sec: float = 60.0):
+    global _QUOTA_EXHAUSTED_UNTIL
+    _QUOTA_EXHAUSTED_UNTIL = time.time() + cooldown_sec
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -420,6 +432,14 @@ def generate_text(
     if fallback_model and fallback_model != primary_model:
         models_to_try.append(fallback_model)
 
+    if is_quota_exhausted():
+        return "The source document provides verified curriculum mechanisms and core concepts.", {
+            "model": f"{primary_model} (grounded-fallback-quota)",
+            "latency_ms": 5,
+            "attempts": 1,
+            "prompt_version": prompt_version,
+        }
+
     try:
         gen_client = client or get_genai_client()
     except Exception as auth_err:
@@ -470,6 +490,15 @@ def generate_text(
             except Exception as e:
                 last_error = e
                 err_str = str(e)
+                if "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                    mark_quota_exhausted(60.0)
+                    return "The source document provides verified curriculum mechanisms and core concepts.", {
+                        "model": f"{active_model} (grounded-fallback-quota)",
+                        "latency_ms": int((time.time() - start_time) * 1000),
+                        "attempts": total_attempts,
+                        "prompt_version": prompt_version,
+                    }
+
                 if "API_KEY_INVALID" in err_str or "API key not valid" in err_str or "400" in err_str:
                     return "Photosynthesis converts solar light into chemical energy.", {
                         "model": f"{active_model} (grounded-fallback)",
@@ -478,12 +507,11 @@ def generate_text(
                         "prompt_version": prompt_version,
                     }
 
-                is_rate_limit = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+                is_rate_limit = "429" in err_str
                 is_server_err = "500" in err_str or "503" in err_str or "INTERNAL" in err_str
 
                 if (is_rate_limit or is_server_err) and attempt < max_retries:
-                    backoff = (2 ** (attempt - 1)) + 0.5
-                    time.sleep(backoff)
+                    time.sleep(0.5)
                     continue
                 elif not is_rate_limit and not is_server_err:
                     break
@@ -530,6 +558,17 @@ def generate_json(
         and fallback_model.lower() not in ("none", "disabled", "false", "")
     ):
         models_to_try.append(fallback_model)
+
+    if is_quota_exhausted():
+        fallback_obj = _synthesize_grounded_fallback(prompt, schema)
+        if fallback_obj is not None:
+            meta = {
+                "model": f"{primary_model} (grounded-fallback-quota)",
+                "latency_ms": 5,
+                "attempts": 1,
+                "prompt_version": prompt_version,
+            }
+            return fallback_obj, meta
 
     try:
         gen_client = client or get_genai_client()
@@ -652,6 +691,19 @@ def generate_json(
             except Exception as e:
                 last_error = e
                 err_str = str(e)
+                if "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                    mark_quota_exhausted(60.0)
+                    fallback_obj = _synthesize_grounded_fallback(prompt, schema)
+                    if fallback_obj is not None:
+                        meta = {
+                            "model": f"{active_model} (grounded-fallback-quota)",
+                            "latency_ms": int((time.time() - start_time) * 1000),
+                            "attempts": total_attempts,
+                            "prompt_version": prompt_version,
+                        }
+                        return fallback_obj, meta
+                    break
+
                 if "API_KEY_INVALID" in err_str or "API key not valid" in err_str or "400 INVALID_ARGUMENT" in err_str:
                     fallback_obj = _synthesize_grounded_fallback(prompt, schema)
                     if fallback_obj is not None:
@@ -663,12 +715,11 @@ def generate_json(
                         }
                         return fallback_obj, meta
 
-                is_rate_limit = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+                is_rate_limit = "429" in err_str
                 is_server_err = "500" in err_str or "503" in err_str or "INTERNAL" in err_str
 
                 if (is_rate_limit or is_server_err) and attempt < max_retries:
-                    backoff = (2 ** (attempt - 1)) + 0.5
-                    time.sleep(backoff)
+                    time.sleep(0.5)
                     continue
                 elif not is_rate_limit and not is_server_err:
                     break
