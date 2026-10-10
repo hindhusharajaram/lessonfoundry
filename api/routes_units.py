@@ -51,6 +51,7 @@ class UnitObjectivesUpdateRequest(BaseModel):
 # ==========================================
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_unit(
     req: UnitCreateRequest,
     db: Session = Depends(get_db),
@@ -263,6 +264,7 @@ def update_objectives(
 
 
 @router.post("/{unit_id}/plan")
+@router.post("/{unit_id}/plan/", include_in_schema=False)
 def generate_plan(
     unit_id: int,
     db: Session = Depends(get_db),
@@ -290,6 +292,7 @@ def generate_plan(
 
 
 @router.post("/{unit_id}/generate")
+@router.post("/{unit_id}/generate/", include_in_schema=False)
 def generate_unit(
     unit_id: int,
     db: Session = Depends(get_db),
@@ -492,6 +495,7 @@ class UnitPublishRequest(BaseModel):
 
 
 @router.post("/{unit_id}/publish")
+@router.post("/{unit_id}/publish/", include_in_schema=False)
 def publish_unit(
     unit_id: int,
     req: UnitPublishRequest = Body(default=UnitPublishRequest()),

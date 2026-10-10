@@ -214,6 +214,7 @@ def extract_pdf_content(file_bytes: bytes) -> Tuple[str, List[Tuple[int, int, in
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
+@router.post("/upload/", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def upload_source(
     title: Optional[str] = Form(None),
     source_id: Optional[int] = Form(None),

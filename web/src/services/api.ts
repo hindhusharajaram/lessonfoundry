@@ -49,13 +49,32 @@ export function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
-// Base API URL configuration (defaults to empty string for relative proxying in dev, or VITE_API_URL in production)
-export const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+// Base API URL configuration supporting both VITE_API_BASE_URL and VITE_API_URL
+export const getEffectiveApiBaseUrl = (): string => {
+  const envUrl = (
+    import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_API_URL ||
+    ''
+  ).trim();
+  if (envUrl) {
+    return envUrl.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const customUrl = localStorage.getItem('lessonfoundry_backend_url');
+    if (customUrl) {
+      return customUrl.trim().replace(/\/$/, '');
+    }
+  }
+  return '';
+};
+
+export const API_BASE_URL = getEffectiveApiBaseUrl();
 
 export function getFullUrl(endpoint: string): string {
+  const baseUrl = getEffectiveApiBaseUrl();
   const clean = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   const path = clean.startsWith('/api') ? clean : `/api${clean}`;
-  return `${API_BASE_URL}${path}`;
+  return `${baseUrl}${path}`;
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -76,17 +95,37 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         errData = { detail: text || response.statusText || `HTTP ${response.status}` };
       }
       let message = errData?.detail || errData?.message;
-      if (response.status === 404) {
-        message = `API endpoint not found (HTTP 404) at ${url}. If using Vercel, ensure your backend server URL is configured in VITE_API_URL, or use the local server at http://localhost:5173.`;
+      if (response.status === 405) {
+        message = `HTTP 405 Method Not Allowed at ${url}. In production, this happens if VITE_API_BASE_URL is missing in Vercel settings (routing POST requests to static assets) or a 307 trailing slash redirect downgraded POST to GET.`;
+      } else if (response.status === 404) {
+        message = `API endpoint not found (HTTP 404) at ${url}. If using Vercel, ensure VITE_API_BASE_URL is configured with your live Render backend URL, or use the local server at http://localhost:5173.`;
       } else if (!message) {
         message = `Request failed with status ${response.status}`;
       }
-      throw new ApiError(response.status, message, errData);
+      console.error(`[API Error ${response.status}]`, {
+        url,
+        method: options.method || 'GET',
+        status: response.status,
+        statusText: response.statusText,
+        payload: errData,
+      });
+      throw new ApiError(response.status, message, {
+        url,
+        method: options.method || 'GET',
+        status: response.status,
+        statusText: response.statusText,
+        error: errData,
+      });
     }
     return await response.json();
   } catch (err: any) {
     if (err instanceof ApiError) throw err;
-    throw new ApiError(500, err.message || 'Network error occurred', err);
+    console.error('[API Network Error]', { url, error: err });
+    throw new ApiError(500, err.message || 'Network error occurred', {
+      url,
+      method: options.method || 'GET',
+      originalError: String(err),
+    });
   }
 }
 
@@ -388,9 +427,10 @@ export const api = {
     } catch (networkErr: any) {
       const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
       const guidance = isVercel
-        ? `Backend server not reachable at ${url}. When hosting on Vercel, please set VITE_API_URL to your deployed backend URL (e.g. Render/Railway) in Vercel Project Settings, or run the app locally at http://localhost:5173.`
+        ? `Backend server not reachable at ${url}. When hosting on Vercel, please set VITE_API_BASE_URL to your deployed backend URL (e.g. Render/Railway) in Vercel Project Settings, or run the app locally at http://localhost:5173.`
         : `Cannot connect to the backend server at ${url}. Please ensure the FastAPI backend is running on port 8000.`;
-      throw new ApiError(503, guidance, networkErr);
+      console.error('[UploadSource Network Error]', { url, method: 'POST', error: networkErr });
+      throw new ApiError(503, guidance, { url, method: 'POST', error: String(networkErr) });
     }
 
     if (!response.ok) {
@@ -402,10 +442,25 @@ export const api = {
         err = { detail: text || response.statusText || `HTTP ${response.status}` };
       }
       let message = err?.detail || err?.message;
-      if (response.status === 404) {
-        message = `Backend server not reachable at ${url} (HTTP 404). When hosting on Vercel, please set VITE_API_URL to your deployed backend (e.g. Render/Railway) in Vercel Project Settings, or run the app locally at http://localhost:5173.`;
+      if (response.status === 405) {
+        message = `HTTP 405 Method Not Allowed at ${url}. In production, this happens if VITE_API_BASE_URL is missing in Vercel settings (routing POST requests to static assets) or a 307 trailing slash redirect downgraded POST to GET.`;
+      } else if (response.status === 404) {
+        message = `Backend server not reachable at ${url} (HTTP 404). When hosting on Vercel, please set VITE_API_BASE_URL to your deployed backend (e.g. Render/Railway) in Vercel Project Settings, or run the app locally at http://localhost:5173.`;
       }
-      throw new ApiError(response.status, message || 'Failed to upload source', err);
+      console.error(`[UploadSource HTTP Error ${response.status}]`, {
+        url,
+        method: 'POST',
+        status: response.status,
+        statusText: response.statusText,
+        payload: err,
+      });
+      throw new ApiError(response.status, message || 'Failed to upload source', {
+        url,
+        method: 'POST',
+        status: response.status,
+        statusText: response.statusText,
+        errorData: err,
+      });
     }
     const raw = await response.json();
     return normalizeUploadResponse(raw);

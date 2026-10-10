@@ -242,8 +242,13 @@ export const WizardPage: React.FC = () => {
       setMaxAccessibleStep(Math.max(maxAccessibleStep, 2));
       setCurrentStep(2);
     } catch (err: any) {
+      console.error('[UploadSource Ingest Error]', {
+        message: err.message,
+        status: err.status,
+        details: err.data || err,
+      });
       setError(err.message || 'Failed to upload source text');
-      setErrorDetails(err.data || err);
+      setErrorDetails(err.data || { error: String(err) });
     } finally {
       setIsUploading(false);
     }
